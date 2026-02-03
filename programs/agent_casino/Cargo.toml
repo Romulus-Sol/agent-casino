@@ -1,0 +1,19 @@
+[package]
+name = "agent-casino"
+version = "0.1.0"
+description = "Agent Casino Protocol - A headless casino for AI agents on Solana"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "agent_casino"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.30.1"

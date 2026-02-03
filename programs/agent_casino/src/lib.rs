@@ -610,6 +610,278 @@ pub mod agent_casino {
 
         Ok(())
     }
+
+    // ==================== PREDICTION MARKETS ====================
+
+    /// Create a new prediction market
+    /// question: Short description (e.g., "Which project wins 1st place?")
+    /// outcomes: Array of outcome names (e.g., ["agent-casino", "clawverse", "sipher"])
+    /// closes_at: Unix timestamp when betting closes
+    pub fn create_prediction_market(
+        ctx: Context<CreatePredictionMarket>,
+        market_id: u64,
+        question: String,
+        outcomes: Vec<String>,
+        closes_at: i64,
+    ) -> Result<()> {
+        require!(outcomes.len() >= 2 && outcomes.len() <= 10, CasinoError::InvalidOutcomeCount);
+        require!(question.len() <= 200, CasinoError::QuestionTooLong);
+        for outcome in &outcomes {
+            require!(outcome.len() <= 32, CasinoError::OutcomeNameTooLong);
+        }
+
+        let clock = Clock::get()?;
+        require!(closes_at > clock.unix_timestamp, CasinoError::InvalidCloseTime);
+
+        let market = &mut ctx.accounts.market;
+        market.authority = ctx.accounts.authority.key();
+        market.market_id = market_id;
+        market.question = question.clone();
+        market.outcome_count = outcomes.len() as u8;
+        market.status = MarketStatus::Open;
+        market.winning_outcome = 0;
+        market.total_pool = 0;
+        market.closes_at = closes_at;
+        market.resolved_at = 0;
+        market.created_at = clock.unix_timestamp;
+        market.bump = ctx.bumps.market;
+
+        // Initialize outcome pools (up to 10 outcomes)
+        market.outcome_pools = [0u64; 10];
+
+        // Store outcome names
+        let mut outcome_names = [[0u8; 32]; 10];
+        for (i, name) in outcomes.iter().enumerate() {
+            let bytes = name.as_bytes();
+            outcome_names[i][..bytes.len()].copy_from_slice(bytes);
+        }
+        market.outcome_names = outcome_names;
+
+        emit!(PredictionMarketCreated {
+            market_id: ctx.accounts.market.key(),
+            authority: ctx.accounts.authority.key(),
+            question,
+            outcome_count: outcomes.len() as u8,
+            closes_at,
+        });
+
+        Ok(())
+    }
+
+    /// Place a bet on a prediction market outcome
+    pub fn place_prediction_bet(
+        ctx: Context<PlacePredictionBet>,
+        outcome_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
+        require!(outcome_index < market.outcome_count, CasinoError::InvalidOutcome);
+        require!(amount > 0, CasinoError::InvalidAmount);
+
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp < market.closes_at, CasinoError::BettingClosed);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+
+        // Capture keys before mutable borrows
+        let market_key = ctx.accounts.market.key();
+        let bettor_key = ctx.accounts.bettor.key();
+
+        // Transfer bet to market account (escrow)
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.bettor.to_account_info(),
+                to: ctx.accounts.market.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        // Update market pools
+        let market = &mut ctx.accounts.market;
+        market.outcome_pools[outcome_index as usize] = market.outcome_pools[outcome_index as usize]
+            .checked_add(amount)
+            .unwrap();
+        market.total_pool = market.total_pool.checked_add(amount).unwrap();
+
+        let outcome_pool = market.outcome_pools[outcome_index as usize];
+        let total_pool = market.total_pool;
+
+        // Initialize or update bet record
+        let bet = &mut ctx.accounts.bet;
+        if bet.bettor == Pubkey::default() {
+            bet.bettor = bettor_key;
+            bet.market = market_key;
+            bet.outcome_index = outcome_index;
+            bet.amount = amount;
+            bet.claimed = false;
+            bet.bump = ctx.bumps.bet;
+        } else {
+            // Adding to existing bet on same outcome
+            require!(bet.outcome_index == outcome_index, CasinoError::CannotChangeBetOutcome);
+            bet.amount = bet.amount.checked_add(amount).unwrap();
+        }
+
+        let total_bet = bet.amount;
+
+        emit!(PredictionBetPlaced {
+            market_id: market_key,
+            bettor: bettor_key,
+            outcome_index,
+            amount,
+            total_bet,
+            outcome_pool,
+            total_pool,
+        });
+
+        Ok(())
+    }
+
+    /// Resolve a prediction market (authority only)
+    pub fn resolve_prediction_market(
+        ctx: Context<ResolvePredictionMarket>,
+        winning_outcome: u8,
+    ) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
+        require!(winning_outcome < market.outcome_count, CasinoError::InvalidOutcome);
+        require!(
+            ctx.accounts.authority.key() == market.authority,
+            CasinoError::NotMarketAuthority
+        );
+
+        // Capture values before mutable borrow
+        let market_key = ctx.accounts.market.key();
+        let total_pool = market.total_pool;
+        let winning_pool = market.outcome_pools[winning_outcome as usize];
+        let clock = Clock::get()?;
+
+        // Calculate house take (from total pool)
+        let house_edge = ctx.accounts.house.house_edge_bps;
+        let house_take = total_pool * house_edge as u64 / 10000;
+
+        // Transfer house take
+        if house_take > 0 {
+            **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= house_take;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += house_take;
+        }
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.total_volume = house.total_volume.checked_add(total_pool).unwrap();
+        house.pool = house.pool.checked_add(house_take).unwrap();
+
+        // Update market state
+        let market = &mut ctx.accounts.market;
+        market.status = MarketStatus::Resolved;
+        market.winning_outcome = winning_outcome;
+        market.resolved_at = clock.unix_timestamp;
+
+        emit!(PredictionMarketResolved {
+            market_id: market_key,
+            winning_outcome,
+            total_pool,
+            winning_pool,
+            house_take,
+        });
+
+        Ok(())
+    }
+
+    /// Claim winnings from a resolved prediction market
+    pub fn claim_prediction_winnings(ctx: Context<ClaimPredictionWinnings>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        let bet = &ctx.accounts.bet;
+
+        require!(market.status == MarketStatus::Resolved, CasinoError::MarketNotResolved);
+        require!(!bet.claimed, CasinoError::AlreadyClaimed);
+        require!(bet.outcome_index == market.winning_outcome, CasinoError::DidNotWin);
+
+        // Calculate winnings: (bet_amount / winning_pool) * (total_pool - house_take)
+        let winning_pool = market.outcome_pools[market.winning_outcome as usize];
+        let house_take = market.total_pool * ctx.accounts.house.house_edge_bps as u64 / 10000;
+        let payout_pool = market.total_pool - house_take;
+
+        let winnings = (bet.amount as u128)
+            .checked_mul(payout_pool as u128)
+            .unwrap()
+            .checked_div(winning_pool as u128)
+            .unwrap() as u64;
+
+        // Transfer winnings
+        **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= winnings;
+        **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += winnings;
+
+        // Mark as claimed
+        let bet = &mut ctx.accounts.bet;
+        bet.claimed = true;
+
+        // Update agent stats
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = ctx.accounts.bettor.key();
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_won = agent_stats.total_won.checked_add(winnings).unwrap();
+        agent_stats.wins += 1;
+
+        emit!(PredictionWinningsClaimed {
+            market_id: ctx.accounts.market.key(),
+            bettor: ctx.accounts.bettor.key(),
+            bet_amount: bet.amount,
+            winnings,
+        });
+
+        Ok(())
+    }
+
+    /// Cancel an open prediction market and refund all bettors (authority only)
+    pub fn cancel_prediction_market(ctx: Context<CancelPredictionMarket>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
+        require!(
+            ctx.accounts.authority.key() == market.authority,
+            CasinoError::NotMarketAuthority
+        );
+
+        let market = &mut ctx.accounts.market;
+        market.status = MarketStatus::Cancelled;
+
+        emit!(PredictionMarketCancelled {
+            market_id: ctx.accounts.market.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Claim refund from a cancelled prediction market
+    pub fn claim_prediction_refund(ctx: Context<ClaimPredictionRefund>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        let bet = &ctx.accounts.bet;
+
+        require!(market.status == MarketStatus::Cancelled, CasinoError::MarketNotCancelled);
+        require!(!bet.claimed, CasinoError::AlreadyClaimed);
+
+        let refund_amount = bet.amount;
+
+        // Transfer refund
+        **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
+        **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += refund_amount;
+
+        // Mark as claimed
+        let bet = &mut ctx.accounts.bet;
+        bet.claimed = true;
+
+        emit!(PredictionRefundClaimed {
+            market_id: ctx.accounts.market.key(),
+            bettor: ctx.accounts.bettor.key(),
+            refund_amount,
+        });
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -852,6 +1124,135 @@ pub struct CancelChallenge<'info> {
     pub challenger: Signer<'info>,
 }
 
+// === Prediction Market Account Structures ===
+
+#[derive(Accounts)]
+#[instruction(market_id: u64, question: String, outcomes: Vec<String>, closes_at: i64)]
+pub struct CreatePredictionMarket<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + PredictionMarket::INIT_SPACE,
+        seeds = [b"pred_mkt", &market_id.to_le_bytes()],
+        bump
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(outcome_index: u8, amount: u64)]
+pub struct PlacePredictionBet<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Open @ CasinoError::MarketNotOpen
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(
+        init_if_needed,
+        payer = bettor,
+        space = 8 + PredictionBet::INIT_SPACE,
+        seeds = [b"pred_bet", market.key().as_ref(), bettor.key().as_ref()],
+        bump
+    )]
+    pub bet: Account<'info, PredictionBet>,
+
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ResolvePredictionMarket<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = market.authority == authority.key() @ CasinoError::NotMarketAuthority
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimPredictionWinnings<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Resolved @ CasinoError::MarketNotResolved
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(
+        mut,
+        seeds = [b"pred_bet", market.key().as_ref(), bettor.key().as_ref()],
+        bump = bet.bump,
+        constraint = bet.bettor == bettor.key() @ CasinoError::NotBetOwner
+    )]
+    pub bet: Account<'info, PredictionBet>,
+
+    #[account(
+        init_if_needed,
+        payer = bettor,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", bettor.key().as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelPredictionMarket<'info> {
+    #[account(
+        mut,
+        constraint = market.authority == authority.key() @ CasinoError::NotMarketAuthority,
+        constraint = market.status == MarketStatus::Open @ CasinoError::MarketNotOpen
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimPredictionRefund<'info> {
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Cancelled @ CasinoError::MarketNotCancelled
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(
+        mut,
+        seeds = [b"pred_bet", market.key().as_ref(), bettor.key().as_ref()],
+        bump = bet.bump,
+        constraint = bet.bettor == bettor.key() @ CasinoError::NotBetOwner
+    )]
+    pub bet: Account<'info, PredictionBet>,
+
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+}
+
 // === State Accounts ===
 
 #[account]
@@ -925,6 +1326,36 @@ pub struct Challenge {
     pub bump: u8,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct PredictionMarket {
+    pub authority: Pubkey,
+    pub market_id: u64,
+    #[max_len(200)]
+    pub question: String,
+    pub outcome_count: u8,
+    pub outcome_names: [[u8; 32]; 10],  // Up to 10 outcomes, 32 bytes each
+    pub outcome_pools: [u64; 10],        // Pool for each outcome
+    pub total_pool: u64,
+    pub status: MarketStatus,
+    pub winning_outcome: u8,
+    pub closes_at: i64,
+    pub resolved_at: i64,
+    pub created_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct PredictionBet {
+    pub bettor: Pubkey,
+    pub market: Pubkey,
+    pub outcome_index: u8,
+    pub amount: u64,
+    pub claimed: bool,
+    pub bump: u8,
+}
+
 // === Types ===
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -939,6 +1370,13 @@ pub enum GameType {
 pub enum ChallengeStatus {
     Open,
     Completed,
+    Cancelled,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum MarketStatus {
+    Open,
+    Resolved,
     Cancelled,
 }
 
@@ -1027,6 +1465,55 @@ pub struct ChallengeCancelled {
     pub amount: u64,
 }
 
+#[event]
+pub struct PredictionMarketCreated {
+    pub market_id: Pubkey,
+    pub authority: Pubkey,
+    pub question: String,
+    pub outcome_count: u8,
+    pub closes_at: i64,
+}
+
+#[event]
+pub struct PredictionBetPlaced {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub outcome_index: u8,
+    pub amount: u64,
+    pub total_bet: u64,
+    pub outcome_pool: u64,
+    pub total_pool: u64,
+}
+
+#[event]
+pub struct PredictionMarketResolved {
+    pub market_id: Pubkey,
+    pub winning_outcome: u8,
+    pub total_pool: u64,
+    pub winning_pool: u64,
+    pub house_take: u64,
+}
+
+#[event]
+pub struct PredictionWinningsClaimed {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub bet_amount: u64,
+    pub winnings: u64,
+}
+
+#[event]
+pub struct PredictionMarketCancelled {
+    pub market_id: Pubkey,
+}
+
+#[event]
+pub struct PredictionRefundClaimed {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub refund_amount: u64,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -1053,4 +1540,33 @@ pub enum CasinoError {
     NotChallengeOwner,
     #[msg("Invalid challenger account")]
     InvalidChallenger,
+    // Prediction market errors
+    #[msg("Must have 2-10 outcomes")]
+    InvalidOutcomeCount,
+    #[msg("Question too long (max 200 chars)")]
+    QuestionTooLong,
+    #[msg("Outcome name too long (max 32 chars)")]
+    OutcomeNameTooLong,
+    #[msg("Close time must be in the future")]
+    InvalidCloseTime,
+    #[msg("Market is not open")]
+    MarketNotOpen,
+    #[msg("Invalid outcome index")]
+    InvalidOutcome,
+    #[msg("Betting has closed")]
+    BettingClosed,
+    #[msg("Only market authority can resolve")]
+    NotMarketAuthority,
+    #[msg("Market has not been resolved")]
+    MarketNotResolved,
+    #[msg("Market was not cancelled")]
+    MarketNotCancelled,
+    #[msg("Winnings already claimed")]
+    AlreadyClaimed,
+    #[msg("Your bet did not win")]
+    DidNotWin,
+    #[msg("Not the bet owner")]
+    NotBetOwner,
+    #[msg("Cannot change bet outcome after placing")]
+    CannotChangeBetOutcome,
 }

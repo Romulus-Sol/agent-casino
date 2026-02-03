@@ -46,7 +46,7 @@ agent-casino/
 
 ### Solana Program (Anchor 0.30.1)
 
-**Program ID:** `AgentCas1noXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX` (placeholder - update after deploy)
+**Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 
 **Instructions:**
 - `initialize_house(house_edge_bps, min_bet, max_bet_percent)` - Set up the casino

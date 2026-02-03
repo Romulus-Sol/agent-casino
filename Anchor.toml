@@ -5,13 +5,13 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-agent_casino = "AgentCas1noXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+agent_casino = "5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV"
 
 [programs.devnet]
-agent_casino = "AgentCas1noXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+agent_casino = "5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV"
 
 [programs.mainnet]
-agent_casino = "AgentCas1noXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+agent_casino = "5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV"
 
 [registry]
 url = "https://api.apr.dev"

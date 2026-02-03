@@ -46,11 +46,12 @@ pub mod agent_casino {
     pub fn add_liquidity(ctx: Context<AddLiquidity>, amount: u64) -> Result<()> {
         require!(amount > 0, CasinoError::InvalidAmount);
 
+        // Transfer SOL to the house account (owned by program, can manipulate lamports)
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.provider.to_account_info(),
-                to: ctx.accounts.house_vault.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
             },
         );
         system_program::transfer(cpi_context, amount)?;
@@ -107,19 +108,19 @@ pub mod agent_casino {
             0
         };
 
-        // Transfer bet
+        // Transfer bet to house account
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house_vault.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
             },
         );
         system_program::transfer(cpi_context, amount)?;
 
-        // Transfer payout if won
+        // Transfer payout if won (house account is program-owned, can manipulate lamports)
         if won && payout > 0 {
-            **ctx.accounts.house_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
 
@@ -212,18 +213,18 @@ pub mod agent_casino {
             0
         };
 
-        // Transfer bet
+        // Transfer bet to house account
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house_vault.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
             },
         );
         system_program::transfer(cpi_context, amount)?;
 
         if won && payout > 0 {
-            **ctx.accounts.house_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
 
@@ -314,17 +315,18 @@ pub mod agent_casino {
             0
         };
 
+        // Transfer bet to house account
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house_vault.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
             },
         );
         system_program::transfer(cpi_context, amount)?;
 
         if won && payout > 0 {
-            **ctx.accounts.house_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
 

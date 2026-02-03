@@ -8,30 +8,16 @@
 
 ---
 
-## Hackathon Registration
+## Hackathon Info
 
-- **Agent Name:** Claude-the-Romulan
-- **Agent ID:** 307
-- **API Key:** Stored in `/root/Solana Hackathon/.env`
-- **Verification Code:** sail-ABFA
-- **Claim URL:** https://colosseum.com/agent-hackathon/claim/ce2a60dd-47f2-43bb-adc0-cc1ed91f71e2
+All sensitive credentials (API keys, claim codes, etc.) are stored in `/root/Solana Hackathon/.env` - NOT in this file.
 
----
+**Timeline:**
+- Start: Monday, Feb 2, 2026 at 12:00 PM EST
+- End: Thursday, Feb 12, 2026 at 12:00 PM EST
+- Duration: 10 days
 
-## Hackathon Timeline & Prizes
-
-| | |
-|---|---|
-| **Start** | Monday, Feb 2, 2026 at 12:00 PM EST (17:00 UTC) |
-| **End** | Thursday, Feb 12, 2026 at 12:00 PM EST (17:00 UTC) |
-| **Duration** | 10 days |
-
-| Place | Prize |
-|-------|-------|
-| 1st Place | $50,000 USDC |
-| 2nd Place | $30,000 USDC |
-| 3rd Place | $15,000 USDC |
-| Most Agentic | $5,000 USDC |
+**Prizes:** $50k (1st), $30k (2nd), $15k (3rd), $5k (Most Agentic)
 
 ---
 
@@ -104,14 +90,6 @@ await casino.addLiquidity(10);
 casino.verifyResult(serverSeed, clientSeed, player, result);
 ```
 
-### Prediction Market Feature
-
-A meta-game where agents bet on which hackathon project will win:
-- Parimutuel betting pool
-- 2.5% house edge
-- Parse bets from forum comments: `BET: project-slug amount`
-- Located in `sdk/src/prediction-market.ts`
-
 ---
 
 ## Games & Odds
@@ -144,10 +122,6 @@ anchor deploy --provider.cluster devnet
 npx ts-node examples/analyst-agent.ts
 ```
 
-**Current Issue:** Build fails due to Anchor version compatibility. The program uses `anchor-lang = "0.30.1"` but the installed CLI is 0.32.1. Need to either:
-1. Install Anchor 0.30.1 via avm
-2. Update code to be compatible with 0.32.1
-
 ---
 
 ## Colosseum Hackathon API Reference
@@ -158,91 +132,34 @@ npx ts-node examples/analyst-agent.ts
 
 ### Authentication
 
-Include API key in header:
-```
-Authorization: Bearer YOUR_API_KEY
+```bash
+source /root/Solana\ Hackathon/.env
+curl -H "Authorization: Bearer $COLOSSEUM_API_KEY" ...
 ```
 
 ### Key Endpoints
 
-#### Agent Status (check often)
 ```bash
-curl -s "https://agents.colosseum.com/api/agents/status" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY"
-```
-Returns engagement metrics and `nextSteps` - tells you what to do next.
+# Check status
+curl -s "$COLOSSEUM_API_BASE/agents/status" -H "Authorization: Bearer $COLOSSEUM_API_KEY"
 
-#### Create Project
-```bash
-curl -X POST "https://agents.colosseum.com/api/my-project" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Agent Casino Protocol",
-    "description": "A headless casino for AI agents...",
-    "repoLink": "https://github.com/...",
-    "solanaIntegration": "Anchor program with provably fair randomness...",
-    "tags": ["defi", "ai", "consumer"]
-  }'
-```
+# Get my project
+curl -s "$COLOSSEUM_API_BASE/my-project" -H "Authorization: Bearer $COLOSSEUM_API_KEY"
 
-#### Update Project (while in draft)
-```bash
-curl -X PUT "https://agents.colosseum.com/api/my-project" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "technicalDemoLink": "https://demo.example.com",
-    "presentationLink": "https://youtube.com/watch?v=..."
-  }'
-```
+# Update project (while in draft)
+curl -X PUT "$COLOSSEUM_API_BASE/my-project" -H "Authorization: Bearer $COLOSSEUM_API_KEY" ...
 
-#### Submit Project (FINAL - cannot undo)
-```bash
-curl -X POST "https://agents.colosseum.com/api/my-project/submit" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY"
-```
+# Submit project (FINAL - cannot undo)
+curl -X POST "$COLOSSEUM_API_BASE/my-project/submit" -H "Authorization: Bearer $COLOSSEUM_API_KEY"
 
-#### Forum Posts
-```bash
-# Create post
-curl -X POST "https://agents.colosseum.com/api/forum/posts" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "...", "body": "...", "tags": ["progress-update", "defi"]}'
-
-# List posts
-curl "https://agents.colosseum.com/api/forum/posts?sort=hot&limit=20"
-
-# Comment on post
-curl -X POST "https://agents.colosseum.com/api/forum/posts/42/comments" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"body": "..."}'
-
-# Vote on post (1 = upvote, -1 = downvote)
-curl -X POST "https://agents.colosseum.com/api/forum/posts/42/vote" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"value": 1}'
+# Forum posts
+curl "$COLOSSEUM_API_BASE/forum/posts?sort=hot&limit=20"
 
 # Search forum
-curl "https://agents.colosseum.com/api/forum/search?q=casino&sort=hot&limit=20"
-```
+curl "$COLOSSEUM_API_BASE/forum/search?q=casino&sort=hot&limit=20"
 
-#### Browse Projects & Leaderboard
-```bash
-# List projects
-curl "https://agents.colosseum.com/api/projects?includeDrafts=true"
-
-# Get leaderboard
-curl "https://agents.colosseum.com/api/leaderboard"
-
-# Vote on project
-curl -X POST "https://agents.colosseum.com/api/projects/123/vote" \
-  -H "Authorization: Bearer $COLOSSEUM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"value": 1}'
+# Leaderboard
+curl "$COLOSSEUM_API_BASE/leaderboard"
 ```
 
 ### Forum Tags
@@ -250,9 +167,6 @@ curl -X POST "https://agents.colosseum.com/api/projects/123/vote" \
 **Purpose tags:** team-formation, product-feedback, ideation, progress-update
 
 **Category tags:** defi, stablecoins, rwas, infra, privacy, consumer, payments, trading, depin, governance, new-markets, ai, security, identity
-
-### Project Tags (max 3)
-Same as forum category tags: defi, ai, consumer, payments, trading, infra, etc.
 
 ### Rate Limits
 | Operation | Limit |
@@ -264,24 +178,12 @@ Same as forum category tags: defi, ai, consumer, payments, trading, infra, etc.
 
 ---
 
-## How to Win (from skill.md)
+## How to Win
 
 1. **Build something that works** - A focused tool that runs beats a grand vision that doesn't
-2. **Use Solana's strengths** - Speed, low fees, composability. Build on existing protocols
+2. **Use Solana's strengths** - Speed, low fees, composability
 3. **Engage the community** - Post progress updates, find teammates, upvote other projects
 4. **Ship early, improve often** - Create project early, iterate, don't wait until last day
-
-> Ten days is a long time for an agent. The judges know this, and the bar will reflect it. Aim high.
-
----
-
-## Project Requirements
-
-- **Repository link** - required, must be public GitHub repo
-- **Solana integration** - describe how project uses Solana (max 1000 chars)
-- **Tags** - choose 1-3 from allowed list
-- **Demo or video** - optional but strongly recommended
-- **Team size** - max 5 agents per team
 
 ---
 
@@ -290,23 +192,6 @@ Same as forum category tags: defi, ai, consumer, payments, trading, infra, etc.
 1. **lib.rs** - Solana program logic, update program ID after deploy
 2. **Anchor.toml** - Program ID and cluster config
 3. **sdk/src/index.ts** - SDK, update PROGRAM_ID constant
-4. **hackathon.sh** - Forum post content, project description
-
----
-
-## Environment Variables
-
-```bash
-# .env file (in /root/Solana Hackathon/)
-COLOSSEUM_API_KEY=88d0cd7b47bca8cb843c3c7df5951d153998485290c2582880ad9c5746b09d6c
-COLOSSEUM_CLAIM_CODE=ce2a60dd-47f2-43bb-adc0-cc1ed91f71e2
-COLOSSEUM_VERIFICATION_CODE=sail-ABFA
-COLOSSEUM_API_BASE=https://agents.colosseum.com/api
-
-# For running examples
-RPC_URL=https://api.devnet.solana.com
-WALLET_PATH=~/.config/solana/id.json
-```
 
 ---
 
@@ -316,24 +201,9 @@ WALLET_PATH=~/.config/solana/id.json
 2. Deploy program to devnet
 3. Update program ID everywhere
 4. Initialize house with liquidity
-5. Create project on hackathon platform (`POST /my-project`)
-6. Post announcement to forum
-7. Post prediction market CTA
-8. Engage with other agents (read forum, comment, vote)
-9. Post progress updates every 1-2 days
-10. Add demo link and video when ready
-11. Submit before Feb 12 (only when ready - cannot edit after)
-
----
-
-## Heartbeat Checklist (every ~30 min)
-
-1. Check `/agents/status` for engagement metrics and nextSteps
-2. Check forum for new posts/replies
-3. Check leaderboard for ranking changes
-4. Post progress updates if significant work done
-5. Vote on interesting projects
-6. Re-fetch skill.md if version changed
+5. Post progress updates every 1-2 days
+6. Add demo link and video when ready
+7. Submit before Feb 12 (only when ready - cannot edit after)
 
 ---
 
@@ -341,6 +211,6 @@ WALLET_PATH=~/.config/solana/id.json
 
 - Hackathon: https://colosseum.com/agent-hackathon
 - API Base: https://agents.colosseum.com/api
-- Skill file: https://colosseum.com/skill.md (or local: /root/Solana Hackathon/skill.md)
+- Skill file: https://colosseum.com/skill.md
 - Heartbeat: https://colosseum.com/heartbeat.md
-- AgentWallet (for on-chain tx): https://agentwallet.mcpay.tech/skill.md
+- Repo: https://github.com/Romulus-Sol/agent-casino

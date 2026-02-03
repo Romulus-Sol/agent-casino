@@ -407,6 +407,209 @@ pub mod agent_casino {
         }
         Ok(())
     }
+
+    // ==================== PvP CHALLENGES ====================
+
+    /// Create a PvP coin flip challenge
+    /// Challenger locks their bet and picks heads (0) or tails (1)
+    /// nonce: unique identifier for this challenge (use timestamp or random number)
+    pub fn create_challenge(
+        ctx: Context<CreateChallenge>,
+        amount: u64,
+        choice: u8,
+        nonce: u64,
+    ) -> Result<()> {
+        require!(choice <= 1, CasinoError::InvalidChoice);
+        require!(amount > 0, CasinoError::InvalidAmount);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+
+        // Transfer challenger's bet to the challenge account (escrow)
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.challenger.to_account_info(),
+                to: ctx.accounts.challenge.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        let clock = Clock::get()?;
+        let challenge = &mut ctx.accounts.challenge;
+        challenge.challenger = ctx.accounts.challenger.key();
+        challenge.amount = amount;
+        challenge.choice = choice;
+        challenge.status = ChallengeStatus::Open;
+        challenge.created_at = clock.unix_timestamp;
+        challenge.acceptor = Pubkey::default();
+        challenge.winner = Pubkey::default();
+        challenge.result = 0;
+        challenge.nonce = nonce;
+        challenge.bump = ctx.bumps.challenge;
+
+        emit!(ChallengeCreated {
+            challenge_id: ctx.accounts.challenge.key(),
+            challenger: ctx.accounts.challenger.key(),
+            amount,
+            choice,
+            created_at: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Accept a PvP challenge - triggers the coin flip
+    /// Acceptor automatically takes the opposite side
+    pub fn accept_challenge(
+        ctx: Context<AcceptChallenge>,
+        client_seed: [u8; 32],
+    ) -> Result<()> {
+        let challenge = &ctx.accounts.challenge;
+        require!(challenge.status == ChallengeStatus::Open, CasinoError::ChallengeNotOpen);
+        require!(challenge.challenger != ctx.accounts.acceptor.key(), CasinoError::CannotAcceptOwnChallenge);
+
+        let amount = challenge.amount;
+        let challenger_choice = challenge.choice;
+
+        // Transfer acceptor's bet to the challenge account
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.acceptor.to_account_info(),
+                to: ctx.accounts.challenge.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        // Generate result
+        let clock = Clock::get()?;
+        let server_seed = generate_seed(
+            ctx.accounts.acceptor.key(),
+            clock.slot,
+            clock.unix_timestamp,
+            ctx.accounts.challenge.key(),
+        );
+        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.challenger.key());
+        let result = (combined[0] % 2) as u8;
+
+        // Determine winner
+        let challenger_won = result == challenger_choice;
+        let winner = if challenger_won {
+            ctx.accounts.challenger.key()
+        } else {
+            ctx.accounts.acceptor.key()
+        };
+
+        // Calculate payout: total pot minus 1% house edge
+        let total_pot = amount.checked_mul(2).unwrap();
+        let house_edge = ctx.accounts.house.house_edge_bps;
+        let house_take = total_pot * house_edge as u64 / 10000;
+        let winner_payout = total_pot - house_take;
+
+        // Transfer house edge to house account
+        if house_take > 0 {
+            **ctx.accounts.challenge.to_account_info().try_borrow_mut_lamports()? -= house_take;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += house_take;
+        }
+
+        // Transfer winnings to winner
+        let winner_account = if challenger_won {
+            ctx.accounts.challenger.to_account_info()
+        } else {
+            ctx.accounts.acceptor.to_account_info()
+        };
+        **ctx.accounts.challenge.to_account_info().try_borrow_mut_lamports()? -= winner_payout;
+        **winner_account.try_borrow_mut_lamports()? += winner_payout;
+
+        // Update challenge state
+        let challenge = &mut ctx.accounts.challenge;
+        challenge.status = ChallengeStatus::Completed;
+        challenge.acceptor = ctx.accounts.acceptor.key();
+        challenge.winner = winner;
+        challenge.result = result;
+        challenge.server_seed = server_seed;
+        challenge.client_seed = client_seed;
+        challenge.completed_at = clock.unix_timestamp;
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.total_games += 1;
+        house.total_volume = house.total_volume.checked_add(total_pot).unwrap();
+        house.pool = house.pool.checked_add(house_take).unwrap();
+
+        // Update challenger stats
+        let challenger_stats = &mut ctx.accounts.challenger_stats;
+        if challenger_stats.agent == Pubkey::default() {
+            challenger_stats.agent = ctx.accounts.challenger.key();
+        }
+        challenger_stats.total_games += 1;
+        challenger_stats.total_wagered = challenger_stats.total_wagered.checked_add(amount).unwrap();
+        challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).unwrap_or(challenger_stats.pvp_games);
+        if challenger_won {
+            challenger_stats.total_won = challenger_stats.total_won.checked_add(winner_payout).unwrap();
+            challenger_stats.wins += 1;
+            challenger_stats.pvp_wins = challenger_stats.pvp_wins.checked_add(1).unwrap_or(challenger_stats.pvp_wins);
+        } else {
+            challenger_stats.losses += 1;
+        }
+
+        // Update acceptor stats
+        let acceptor_stats = &mut ctx.accounts.acceptor_stats;
+        if acceptor_stats.agent == Pubkey::default() {
+            acceptor_stats.agent = ctx.accounts.acceptor.key();
+            acceptor_stats.bump = ctx.bumps.acceptor_stats;
+        }
+        acceptor_stats.total_games += 1;
+        acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).unwrap();
+        acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).unwrap_or(acceptor_stats.pvp_games);
+        if !challenger_won {
+            acceptor_stats.total_won = acceptor_stats.total_won.checked_add(winner_payout).unwrap();
+            acceptor_stats.wins += 1;
+            acceptor_stats.pvp_wins = acceptor_stats.pvp_wins.checked_add(1).unwrap_or(acceptor_stats.pvp_wins);
+        } else {
+            acceptor_stats.losses += 1;
+        }
+
+        emit!(ChallengeAccepted {
+            challenge_id: ctx.accounts.challenge.key(),
+            challenger: ctx.accounts.challenger.key(),
+            acceptor: ctx.accounts.acceptor.key(),
+            amount,
+            challenger_choice,
+            result,
+            winner,
+            payout: winner_payout,
+            house_take,
+        });
+
+        Ok(())
+    }
+
+    /// Cancel an open challenge and refund the challenger
+    pub fn cancel_challenge(ctx: Context<CancelChallenge>) -> Result<()> {
+        let challenge = &ctx.accounts.challenge;
+        require!(challenge.status == ChallengeStatus::Open, CasinoError::ChallengeNotOpen);
+        require!(challenge.challenger == ctx.accounts.challenger.key(), CasinoError::NotChallengeOwner);
+
+        let amount = challenge.amount;
+
+        // Refund challenger
+        **ctx.accounts.challenge.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.challenger.to_account_info().try_borrow_mut_lamports()? += amount;
+
+        // Update challenge state
+        let challenge = &mut ctx.accounts.challenge;
+        challenge.status = ChallengeStatus::Cancelled;
+
+        emit!(ChallengeCancelled {
+            challenge_id: ctx.accounts.challenge.key(),
+            challenger: ctx.accounts.challenger.key(),
+            amount,
+        });
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -573,6 +776,82 @@ pub struct UpdateAgentStats<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// === PvP Challenge Account Structures ===
+
+#[derive(Accounts)]
+#[instruction(amount: u64, choice: u8, nonce: u64)]
+pub struct CreateChallenge<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = challenger,
+        space = 8 + Challenge::INIT_SPACE,
+        seeds = [b"challenge", challenger.key().as_ref(), &nonce.to_le_bytes()],
+        bump
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    #[account(mut)]
+    pub challenger: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptChallenge<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = challenge.status == ChallengeStatus::Open @ CasinoError::ChallengeNotOpen
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    /// CHECK: The original challenger, verified by challenge.challenger
+    #[account(
+        mut,
+        constraint = challenger.key() == challenge.challenger @ CasinoError::InvalidChallenger
+    )]
+    pub challenger: AccountInfo<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = acceptor,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", challenge.challenger.as_ref()],
+        bump
+    )]
+    pub challenger_stats: Account<'info, AgentStats>,
+
+    #[account(
+        init_if_needed,
+        payer = acceptor,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", acceptor.key().as_ref()],
+        bump
+    )]
+    pub acceptor_stats: Account<'info, AgentStats>,
+
+    #[account(mut)]
+    pub acceptor: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelChallenge<'info> {
+    #[account(
+        mut,
+        constraint = challenge.challenger == challenger.key() @ CasinoError::NotChallengeOwner,
+        constraint = challenge.status == ChallengeStatus::Open @ CasinoError::ChallengeNotOpen
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    #[account(mut)]
+    pub challenger: Signer<'info>,
+}
+
 // === State Accounts ===
 
 #[account]
@@ -623,6 +902,26 @@ pub struct AgentStats {
     pub total_won: u64,
     pub wins: u64,
     pub losses: u64,
+    pub pvp_games: u64,
+    pub pvp_wins: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Challenge {
+    pub challenger: Pubkey,
+    pub acceptor: Pubkey,
+    pub amount: u64,
+    pub choice: u8,              // 0 = heads, 1 = tails
+    pub status: ChallengeStatus,
+    pub result: u8,
+    pub winner: Pubkey,
+    pub server_seed: [u8; 32],
+    pub client_seed: [u8; 32],
+    pub created_at: i64,
+    pub completed_at: i64,
+    pub nonce: u64,
     pub bump: u8,
 }
 
@@ -633,6 +932,14 @@ pub enum GameType {
     CoinFlip,
     DiceRoll,
     Limbo,
+    PvPChallenge,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum ChallengeStatus {
+    Open,
+    Completed,
+    Cancelled,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -691,6 +998,35 @@ pub struct LimboPlayed {
     pub slot: u64,
 }
 
+#[event]
+pub struct ChallengeCreated {
+    pub challenge_id: Pubkey,
+    pub challenger: Pubkey,
+    pub amount: u64,
+    pub choice: u8,
+    pub created_at: i64,
+}
+
+#[event]
+pub struct ChallengeAccepted {
+    pub challenge_id: Pubkey,
+    pub challenger: Pubkey,
+    pub acceptor: Pubkey,
+    pub amount: u64,
+    pub challenger_choice: u8,
+    pub result: u8,
+    pub winner: Pubkey,
+    pub payout: u64,
+    pub house_take: u64,
+}
+
+#[event]
+pub struct ChallengeCancelled {
+    pub challenge_id: Pubkey,
+    pub challenger: Pubkey,
+    pub amount: u64,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -709,4 +1045,12 @@ pub enum CasinoError {
     InsufficientLiquidity,
     #[msg("Invalid choice for this game")]
     InvalidChoice,
+    #[msg("Challenge is not open")]
+    ChallengeNotOpen,
+    #[msg("Cannot accept your own challenge")]
+    CannotAcceptOwnChallenge,
+    #[msg("Only the challenger can cancel")]
+    NotChallengeOwner,
+    #[msg("Invalid challenger account")]
+    InvalidChallenger,
 }

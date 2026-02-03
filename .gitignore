@@ -50,3 +50,6 @@ Cargo.lock
 *.pem
 *.key
 .cache/
+
+# Demo wallet (do not commit)
+demo/demo-wallet.json

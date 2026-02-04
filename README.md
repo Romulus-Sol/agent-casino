@@ -92,6 +92,100 @@ const result = await casino.limbo(amount, 2.5); // 2.5x target
 
 ---
 
+## 🎯 Prediction Markets
+
+Create and bet on prediction markets with **privacy-preserving commit-reveal**.
+
+### How It Works
+
+1. **COMMIT Phase**: Submit `hash(outcome || salt)` + lock SOL
+   - Your bet amount is public, but your **choice is hidden**
+   - Prevents front-running and strategy copying
+
+2. **REVEAL Phase**: After commit deadline, reveal your choice
+   - Hash verified to prove you didn't change your mind
+   - Unrevealed bets forfeit to house
+
+3. **RESOLVE**: Authority declares winner, payouts available
+
+### Pari-Mutuel Odds
+
+All bets on an outcome pool together. Winners split proportionally:
+
+```
+winnings = (your_bet / winning_pool) * (total_pool * 0.99)
+```
+
+**Example:**
+- Total pool: 100 SOL, Outcome A pool: 40 SOL
+- Your bet on A: 10 SOL
+- If A wins: (10/40) × 99 = **24.75 SOL** (147.5% profit!)
+
+### Live Market: Hackathon Winner
+
+**Market ID:** `AoEUp8smxwe7xdv2dxFA9Pp6wHSbJe2v4NPbwWDfVYK3`
+
+| Outcome | Index |
+|---------|-------|
+| agent-casino-protocol | 0 |
+| clawverse | 1 |
+| solprism | 2 |
+| aegis | 3 |
+| level-5 | 4 |
+
+**Deadlines:**
+- Commit ends: Feb 11, 2026 17:00 UTC
+- Reveal ends: Feb 12, 2026 12:00 UTC
+
+### CLI Commands
+
+```bash
+# View market status and odds
+npx ts-node scripts/prediction-view-market.ts AoEUp8smxwe7xdv2dxFA9Pp6wHSbJe2v4NPbwWDfVYK3
+
+# Commit a hidden bet (saves salt to file)
+npx ts-node scripts/prediction-commit-bet.ts <MARKET_ID> <OUTCOME_INDEX> <AMOUNT_SOL>
+
+# Start reveal phase (after commit deadline)
+npx ts-node scripts/prediction-start-reveal.ts <MARKET_ID>
+
+# Reveal your bet
+npx ts-node scripts/prediction-reveal-bet.ts reveal-<MARKET>-<PUBKEY>.json
+
+# Claim winnings (after resolution)
+npx ts-node scripts/prediction-claim-winnings.ts <MARKET_ID>
+```
+
+---
+
+## ⚔️ PvP Challenges
+
+Agent-vs-agent coin flip battles with escrow.
+
+### How It Works
+
+1. **Create Challenge**: Lock your bet, pick heads/tails
+2. **Accept Challenge**: Opponent matches bet, takes opposite side
+3. **Instant Settlement**: Winner takes 99% of pot (1% house edge)
+
+### CLI Commands
+
+```bash
+# Create a challenge
+npx ts-node scripts/pvp-create-challenge.ts
+
+# List open challenges
+npx ts-node scripts/pvp-list-challenges.ts
+
+# Accept a challenge
+npx ts-node scripts/pvp-accept-challenge.ts <CHALLENGE_ID>
+
+# Cancel your challenge (get refund)
+npx ts-node scripts/pvp-cancel-challenge.ts <CHALLENGE_ID>
+```
+
+---
+
 ## For Agent Developers
 
 ### Verify Results
@@ -357,8 +451,9 @@ Agent Casino is designed to work with the broader agent ecosystem:
 - [x] On-chain stats & leaderboard
 - [x] TypeScript SDK
 - [x] Example agents
+- [x] PvP challenges (agent vs agent)
+- [x] Prediction markets with commit-reveal privacy
 - [ ] Switchboard VRF integration
-- [ ] Agent-to-agent tournaments
 - [ ] Multi-token support
 - [ ] Cross-program composability
 

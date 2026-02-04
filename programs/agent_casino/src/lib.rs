@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
+use anchor_spl::token::{self, Token, Transfer};
+use switchboard_on_demand::RandomnessAccountData;
 
 declare_id!("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
@@ -1764,6 +1766,378 @@ pub mod agent_casino {
 
         Ok(())
     }
+
+    // === Multi-Token Support Instructions ===
+
+    /// Initialize a token vault for SPL token betting
+    pub fn initialize_token_vault(
+        ctx: Context<InitializeTokenVault>,
+        house_edge_bps: u16,
+        min_bet: u64,
+        max_bet_percent: u8,
+    ) -> Result<()> {
+        require!(house_edge_bps <= 1000, CasinoError::HouseEdgeTooHigh);
+        require!(max_bet_percent > 0 && max_bet_percent <= 10, CasinoError::InvalidMaxBet);
+
+        // Create the vault's token account via CPI
+        let mint_key = ctx.accounts.mint.key();
+        let vault_ata_seeds = &[
+            b"token_vault_ata",
+            mint_key.as_ref(),
+            &[ctx.bumps.vault_ata],
+        ];
+        let signer_seeds = &[&vault_ata_seeds[..]];
+
+        // Initialize token account
+        let rent = Rent::get()?;
+        let space = 165; // TokenAccount size
+        let lamports = rent.minimum_balance(space);
+
+        system_program::create_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::CreateAccount {
+                    from: ctx.accounts.authority.to_account_info(),
+                    to: ctx.accounts.vault_ata.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            lamports,
+            space as u64,
+            ctx.accounts.token_program.key,
+        )?;
+
+        // Initialize as token account
+        token::initialize_account3(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::InitializeAccount3 {
+                    account: ctx.accounts.vault_ata.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    authority: ctx.accounts.token_vault.to_account_info(),
+                },
+            ),
+        )?;
+
+        let vault = &mut ctx.accounts.token_vault;
+        vault.authority = ctx.accounts.authority.key();
+        vault.mint = ctx.accounts.mint.key();
+        vault.vault_ata = ctx.accounts.vault_ata.key();
+        vault.pool = 0;
+        vault.house_edge_bps = house_edge_bps;
+        vault.min_bet = min_bet;
+        vault.max_bet_percent = max_bet_percent;
+        vault.total_games = 0;
+        vault.total_volume = 0;
+        vault.total_payout = 0;
+        vault.bump = ctx.bumps.token_vault;
+
+        emit!(TokenVaultInitialized {
+            vault: vault.key(),
+            mint: vault.mint,
+            authority: vault.authority,
+            house_edge_bps,
+            min_bet,
+            max_bet_percent,
+        });
+
+        Ok(())
+    }
+
+    /// Add liquidity to a token vault
+    pub fn token_add_liquidity(ctx: Context<TokenAddLiquidity>, amount: u64) -> Result<()> {
+        require!(amount > 0, CasinoError::InvalidAmount);
+
+        // Transfer tokens from provider to vault
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.provider_ata.to_account_info(),
+            to: ctx.accounts.vault_ata.to_account_info(),
+            authority: ctx.accounts.provider.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        token::transfer(cpi_ctx, amount)?;
+
+        // Update LP position
+        let lp_position = &mut ctx.accounts.lp_position;
+        if lp_position.provider == Pubkey::default() {
+            lp_position.provider = ctx.accounts.provider.key();
+            lp_position.vault = ctx.accounts.token_vault.key();
+            lp_position.mint = ctx.accounts.mint.key();
+            lp_position.bump = ctx.bumps.lp_position;
+        }
+        lp_position.deposited = lp_position.deposited.checked_add(amount).unwrap();
+
+        // Update vault pool
+        let vault = &mut ctx.accounts.token_vault;
+        vault.pool = vault.pool.checked_add(amount).unwrap();
+
+        emit!(TokenLiquidityAdded {
+            vault: vault.key(),
+            mint: vault.mint,
+            provider: ctx.accounts.provider.key(),
+            amount,
+            total_pool: vault.pool,
+        });
+
+        Ok(())
+    }
+
+    /// Token coin flip - 50/50 odds with SPL tokens
+    pub fn token_coin_flip(
+        ctx: Context<TokenCoinFlip>,
+        amount: u64,
+        choice: u8,
+        client_seed: [u8; 32],
+    ) -> Result<()> {
+        require!(choice <= 1, CasinoError::InvalidChoice);
+
+        let vault = &ctx.accounts.token_vault;
+        require!(amount >= vault.min_bet, CasinoError::BetTooSmall);
+        let max_bet = vault.pool * vault.max_bet_percent as u64 / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+        require!(vault.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+
+        let clock = Clock::get()?;
+        let server_seed = generate_seed(
+            ctx.accounts.player.key(),
+            clock.slot,
+            clock.unix_timestamp,
+            ctx.accounts.token_vault.key(),
+        );
+        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
+        let result = (combined[0] % 2) as u8;
+
+        let won = result == choice;
+        let payout = if won {
+            calculate_payout(amount, 2_00, vault.house_edge_bps)
+        } else {
+            0
+        };
+
+        // Transfer bet from player to vault
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.player_ata.to_account_info(),
+            to: ctx.accounts.vault_ata.to_account_info(),
+            authority: ctx.accounts.player.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        token::transfer(cpi_ctx, amount)?;
+
+        // Transfer payout if won (vault is PDA, needs seeds for signing)
+        if won && payout > 0 {
+            let mint_key = ctx.accounts.mint.key();
+            let seeds = &[
+                b"token_vault",
+                mint_key.as_ref(),
+                &[vault.bump],
+            ];
+            let signer_seeds = &[&seeds[..]];
+
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.vault_ata.to_account_info(),
+                to: ctx.accounts.player_ata.to_account_info(),
+                authority: ctx.accounts.token_vault.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+                signer_seeds,
+            );
+            token::transfer(cpi_ctx, payout)?;
+        }
+
+        // Update vault stats
+        let vault = &mut ctx.accounts.token_vault;
+        vault.total_games += 1;
+        vault.total_volume = vault.total_volume.checked_add(amount).unwrap();
+        if won {
+            vault.total_payout = vault.total_payout.checked_add(payout).unwrap();
+            vault.pool = vault.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+        } else {
+            vault.pool = vault.pool.checked_add(amount).unwrap();
+        }
+
+        // Update agent stats (shared with SOL games)
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = ctx.accounts.player.key();
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games += 1;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        // Record game
+        let game_record = &mut ctx.accounts.game_record;
+        game_record.player = ctx.accounts.player.key();
+        game_record.mint = ctx.accounts.mint.key();
+        game_record.game_type = GameType::CoinFlip;
+        game_record.amount = amount;
+        game_record.choice = choice;
+        game_record.result = result;
+        game_record.payout = payout;
+        game_record.server_seed = server_seed;
+        game_record.client_seed = client_seed;
+        game_record.timestamp = clock.unix_timestamp;
+        game_record.slot = clock.slot;
+        game_record.bump = ctx.bumps.game_record;
+
+        emit!(TokenGamePlayed {
+            player: ctx.accounts.player.key(),
+            mint: ctx.accounts.mint.key(),
+            game_type: GameType::CoinFlip,
+            amount,
+            choice,
+            result,
+            payout,
+            won,
+            server_seed,
+            client_seed,
+            slot: clock.slot,
+        });
+
+        Ok(())
+    }
+
+    // === Switchboard VRF Instructions ===
+
+    /// Request a VRF-based coin flip - bet is locked until randomness is fulfilled
+    pub fn vrf_coin_flip_request(
+        ctx: Context<VrfCoinFlipRequest>,
+        amount: u64,
+        choice: u8,
+    ) -> Result<()> {
+        require!(choice <= 1, CasinoError::InvalidChoice);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+
+        // Transfer bet to house
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        let clock = Clock::get()?;
+
+        // Create VRF request record
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.player = ctx.accounts.player.key();
+        vrf_request.house = ctx.accounts.house.key();
+        vrf_request.randomness_account = ctx.accounts.randomness_account.key();
+        vrf_request.game_type = GameType::CoinFlip;
+        vrf_request.amount = amount;
+        vrf_request.choice = choice;
+        vrf_request.status = VrfStatus::Pending;
+        vrf_request.created_at = clock.unix_timestamp;
+        vrf_request.settled_at = 0;
+        vrf_request.result = 0;
+        vrf_request.payout = 0;
+        vrf_request.bump = ctx.bumps.vrf_request;
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.total_games += 1;
+        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+
+        emit!(VrfRequestCreated {
+            request: ctx.accounts.vrf_request.key(),
+            player: ctx.accounts.player.key(),
+            randomness_account: ctx.accounts.randomness_account.key(),
+            game_type: GameType::CoinFlip,
+            amount,
+            choice,
+        });
+
+        Ok(())
+    }
+
+    /// Settle a VRF coin flip using Switchboard randomness
+    pub fn vrf_coin_flip_settle(ctx: Context<VrfCoinFlipSettle>) -> Result<()> {
+        // Load and validate Switchboard randomness
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        // Get the revealed randomness value
+        let clock = Clock::get()?;
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        // Use first byte for coin flip result
+        let result = (randomness[0] % 2) as u8;
+        let vrf_request = &ctx.accounts.vrf_request;
+        let won = result == vrf_request.choice;
+
+        let house = &ctx.accounts.house;
+        let payout = if won {
+            calculate_payout(vrf_request.amount, 2_00, house.house_edge_bps)
+        } else {
+            0
+        };
+
+        // Transfer payout if won
+        if won && payout > 0 {
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
+        }
+
+        // Update house pool
+        let house = &mut ctx.accounts.house;
+        if won {
+            house.total_payout = house.total_payout.checked_add(payout).unwrap();
+            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).unwrap_or(0);
+        } else {
+            house.pool = house.pool.checked_add(vrf_request.amount).unwrap();
+        }
+
+        // Update agent stats
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = vrf_request.player;
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games += 1;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).unwrap();
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        // Update VRF request
+        let request_key = ctx.accounts.vrf_request.key();
+        let player_key = ctx.accounts.vrf_request.player;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.status = VrfStatus::Settled;
+        vrf_request.settled_at = clock.unix_timestamp;
+        vrf_request.result = result;
+        vrf_request.payout = payout;
+
+        emit!(VrfRequestSettled {
+            request: request_key,
+            player: player_key,
+            randomness: randomness,
+            result,
+            payout,
+            won,
+        });
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -2535,6 +2909,183 @@ pub struct ArbitrateHit<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// === Multi-Token Contexts ===
+
+#[derive(Accounts)]
+pub struct InitializeTokenVault<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + TokenVault::INIT_SPACE,
+        seeds = [b"token_vault", mint.key().as_ref()],
+        bump
+    )]
+    pub token_vault: Account<'info, TokenVault>,
+
+    /// CHECK: SPL token mint - validated by token program
+    pub mint: UncheckedAccount<'info>,
+
+    /// CHECK: The vault's token account (ATA) - initialized by token program
+    #[account(
+        mut,
+        seeds = [b"token_vault_ata", mint.key().as_ref()],
+        bump
+    )]
+    pub vault_ata: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    /// CHECK: Rent sysvar
+    pub rent: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct TokenAddLiquidity<'info> {
+    #[account(
+        mut,
+        seeds = [b"token_vault", mint.key().as_ref()],
+        bump = token_vault.bump
+    )]
+    pub token_vault: Account<'info, TokenVault>,
+
+    /// CHECK: SPL token mint
+    pub mint: UncheckedAccount<'info>,
+
+    /// CHECK: Vault's token account
+    #[account(
+        mut,
+        seeds = [b"token_vault_ata", mint.key().as_ref()],
+        bump
+    )]
+    pub vault_ata: UncheckedAccount<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = provider,
+        space = 8 + TokenLpPosition::INIT_SPACE,
+        seeds = [b"token_lp", token_vault.key().as_ref(), provider.key().as_ref()],
+        bump
+    )]
+    pub lp_position: Account<'info, TokenLpPosition>,
+
+    /// CHECK: Provider's token account - validated by token program
+    #[account(mut)]
+    pub provider_ata: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub provider: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct TokenCoinFlip<'info> {
+    #[account(
+        mut,
+        seeds = [b"token_vault", mint.key().as_ref()],
+        bump = token_vault.bump
+    )]
+    pub token_vault: Account<'info, TokenVault>,
+
+    /// CHECK: SPL token mint
+    pub mint: UncheckedAccount<'info>,
+
+    /// CHECK: Vault's token account
+    #[account(
+        mut,
+        seeds = [b"token_vault_ata", mint.key().as_ref()],
+        bump
+    )]
+    pub vault_ata: UncheckedAccount<'info>,
+
+    #[account(
+        init,
+        payer = player,
+        space = 8 + TokenGameRecord::INIT_SPACE,
+        seeds = [b"token_game", token_vault.key().as_ref(), &token_vault.total_games.to_le_bytes()],
+        bump
+    )]
+    pub game_record: Account<'info, TokenGameRecord>,
+
+    #[account(
+        init_if_needed,
+        payer = player,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", player.key().as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    /// CHECK: Player's token account - validated by token program
+    #[account(mut)]
+    pub player_ata: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+// === Switchboard VRF Contexts ===
+
+#[derive(Accounts)]
+pub struct VrfCoinFlipRequest<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = player,
+        space = 8 + VrfRequest::INIT_SPACE,
+        seeds = [b"vrf_request", player.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Switchboard randomness account - validated in instruction
+    pub randomness_account: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VrfCoinFlipSettle<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        seeds = [b"vrf_request", vrf_request.player.as_ref(), &house.total_games.saturating_sub(1).to_le_bytes()],
+        bump = vrf_request.bump,
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    #[account(
+        init_if_needed,
+        payer = settler,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", vrf_request.player.as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    /// CHECK: Switchboard randomness account
+    pub randomness_account: UncheckedAccount<'info>,
+
+    /// CHECK: Player to receive payout
+    #[account(mut)]
+    pub player: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub settler: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 // === State Accounts ===
 
 #[account]
@@ -2734,6 +3285,82 @@ pub struct Arbitration {
     #[max_len(3)]
     pub votes: Vec<bool>,            // true = approve, false = reject
     pub bump: u8,
+}
+
+// === Multi-Token Support ===
+
+/// Token vault for SPL token betting
+/// Each token mint gets its own vault with independent pool and settings
+#[account]
+#[derive(InitSpace)]
+pub struct TokenVault {
+    pub authority: Pubkey,           // House authority
+    pub mint: Pubkey,                // SPL token mint address
+    pub vault_ata: Pubkey,           // Associated token account holding tokens
+    pub pool: u64,                   // Total tokens in the pool
+    pub house_edge_bps: u16,         // House edge in basis points
+    pub min_bet: u64,                // Minimum bet in token units
+    pub max_bet_percent: u8,         // Max bet as % of pool
+    pub total_games: u64,
+    pub total_volume: u64,
+    pub total_payout: u64,
+    pub bump: u8,
+}
+
+/// LP position for token-based liquidity
+#[account]
+#[derive(InitSpace)]
+pub struct TokenLpPosition {
+    pub provider: Pubkey,
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+    pub deposited: u64,
+    pub bump: u8,
+}
+
+/// Token game record for auditing
+#[account]
+#[derive(InitSpace)]
+pub struct TokenGameRecord {
+    pub player: Pubkey,
+    pub mint: Pubkey,
+    pub game_type: GameType,
+    pub amount: u64,
+    pub choice: u8,
+    pub result: u8,
+    pub payout: u64,
+    pub server_seed: [u8; 32],
+    pub client_seed: [u8; 32],
+    pub timestamp: i64,
+    pub slot: u64,
+    pub bump: u8,
+}
+
+// === Switchboard VRF Support ===
+
+/// VRF game request - holds bet until randomness is fulfilled
+#[account]
+#[derive(InitSpace)]
+pub struct VrfRequest {
+    pub player: Pubkey,
+    pub house: Pubkey,
+    pub randomness_account: Pubkey,  // Switchboard randomness account
+    pub game_type: GameType,
+    pub amount: u64,
+    pub choice: u8,
+    pub status: VrfStatus,
+    pub created_at: i64,
+    pub settled_at: i64,
+    pub result: u8,
+    pub payout: u64,
+    pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum VrfStatus {
+    Pending,    // Waiting for randomness
+    Settled,    // Game completed
+    Expired,    // Timeout - refund available
 }
 
 // === Types ===
@@ -3078,6 +3705,64 @@ pub struct ArbitrationResolved {
     pub votes_reject: u8,
 }
 
+// === Multi-Token Events ===
+
+#[event]
+pub struct TokenVaultInitialized {
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+    pub authority: Pubkey,
+    pub house_edge_bps: u16,
+    pub min_bet: u64,
+    pub max_bet_percent: u8,
+}
+
+#[event]
+pub struct TokenLiquidityAdded {
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+    pub provider: Pubkey,
+    pub amount: u64,
+    pub total_pool: u64,
+}
+
+#[event]
+pub struct TokenGamePlayed {
+    pub player: Pubkey,
+    pub mint: Pubkey,
+    pub game_type: GameType,
+    pub amount: u64,
+    pub choice: u8,
+    pub result: u8,
+    pub payout: u64,
+    pub won: bool,
+    pub server_seed: [u8; 32],
+    pub client_seed: [u8; 32],
+    pub slot: u64,
+}
+
+// === Switchboard VRF Events ===
+
+#[event]
+pub struct VrfRequestCreated {
+    pub request: Pubkey,
+    pub player: Pubkey,
+    pub randomness_account: Pubkey,
+    pub game_type: GameType,
+    pub amount: u64,
+    pub choice: u8,
+}
+
+#[event]
+pub struct VrfRequestSettled {
+    pub request: Pubkey,
+    pub player: Pubkey,
+    pub randomness: [u8; 32],
+    pub result: u8,
+    pub payout: u64,
+    pub won: bool,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -3208,4 +3893,20 @@ pub enum CasinoError {
     HitPoolMismatch,
     #[msg("Stake amount too low")]
     StakeTooLow,
+    // Multi-token errors
+    #[msg("Token vault not initialized for this mint")]
+    TokenVaultNotInitialized,
+    #[msg("Invalid token mint")]
+    InvalidMint,
+    #[msg("Token vault mismatch")]
+    TokenVaultMismatch,
+    #[msg("Insufficient token balance")]
+    InsufficientTokenBalance,
+    // Switchboard VRF errors
+    #[msg("VRF request already settled")]
+    VrfAlreadySettled,
+    #[msg("VRF randomness not ready yet")]
+    VrfRandomnessNotReady,
+    #[msg("Invalid VRF randomness account")]
+    VrfInvalidRandomness,
 }

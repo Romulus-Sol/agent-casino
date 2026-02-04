@@ -388,6 +388,110 @@ pub mod agent_casino {
         Ok(())
     }
 
+    /// Crash game - set a cashout multiplier, win if crash point >= your target
+    /// Uses exponential distribution where most games crash early but high multipliers possible
+    /// Multiplier range: 1.01x (101) to 100x (10000), represented as integers * 100
+    pub fn crash(
+        ctx: Context<PlayGame>,
+        amount: u64,
+        cashout_multiplier: u16,
+        client_seed: [u8; 32],
+    ) -> Result<()> {
+        require!(cashout_multiplier >= 101 && cashout_multiplier <= 10000, CasinoError::InvalidChoice);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+
+        let clock = Clock::get()?;
+        let server_seed = generate_seed(
+            ctx.accounts.player.key(),
+            clock.slot,
+            clock.unix_timestamp,
+            ctx.accounts.house.key(),
+        );
+        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
+
+        let raw = u32::from_le_bytes([combined[0], combined[1], combined[2], combined[3]]);
+        let crash_point = calculate_crash_point(raw, house.house_edge_bps);
+
+        // Player wins if the crash point is >= their cashout multiplier
+        let won = crash_point >= cashout_multiplier;
+        let payout = if won {
+            (amount as u128 * cashout_multiplier as u128 / 100) as u64
+        } else {
+            0
+        };
+
+        // Transfer bet to house account
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        if won && payout > 0 {
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
+        }
+
+        let house = &mut ctx.accounts.house;
+        house.total_games += 1;
+        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        if won {
+            house.total_payout = house.total_payout.checked_add(payout).unwrap();
+            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+        } else {
+            house.pool = house.pool.checked_add(amount).unwrap();
+        }
+
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = ctx.accounts.player.key();
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games += 1;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        let game_record = &mut ctx.accounts.game_record;
+        game_record.player = ctx.accounts.player.key();
+        game_record.game_type = GameType::Crash;
+        game_record.amount = amount;
+        game_record.choice = (cashout_multiplier >> 8) as u8;
+        game_record.result = (crash_point >> 8) as u8;
+        game_record.payout = payout;
+        game_record.server_seed = server_seed;
+        game_record.client_seed = client_seed;
+        game_record.timestamp = clock.unix_timestamp;
+        game_record.slot = clock.slot;
+        game_record.bump = ctx.bumps.game_record;
+
+        emit!(CrashPlayed {
+            player: ctx.accounts.player.key(),
+            amount,
+            cashout_multiplier,
+            crash_point,
+            payout,
+            won,
+            server_seed,
+            client_seed,
+            slot: clock.slot,
+        });
+
+        Ok(())
+    }
+
     /// Get house stats
     pub fn get_house_stats(ctx: Context<GetHouseStats>) -> Result<HouseStats> {
         let house = &ctx.accounts.house;
@@ -2437,6 +2541,32 @@ fn calculate_limbo_result(raw: u32, house_edge_bps: u16) -> u16 {
     (result.min(10000.0) as u16).max(100)
 }
 
+/// Calculate crash point using exponential distribution
+/// This creates the classic Crash game feel where most games crash early
+/// but occasionally can go very high. Uses formula: crash_point = 99 / (1 - e)
+/// where e is the normalized random value, giving ~1% house edge
+fn calculate_crash_point(raw: u32, house_edge_bps: u16) -> u16 {
+    let max = u32::MAX as f64;
+    let normalized = raw as f64 / max;
+
+    // Classic crash formula with house edge adjustment
+    // Base formula: 99 / (1 - normalized * 0.99)
+    // This creates exponential distribution with 1% built-in edge
+    let edge_factor = 1.0 - (house_edge_bps as f64 / 10000.0);
+
+    // Crash point calculation - inverse exponential distribution
+    // Most games crash between 1x-3x, but can occasionally go 50x+
+    let divisor = 1.0 - (normalized * 0.99);
+    let crash_multiplier = if divisor > 0.001 {
+        (99.0 * edge_factor / divisor)
+    } else {
+        10000.0 // Cap at 100x for edge cases
+    };
+
+    // Return as integer (100 = 1.00x, 200 = 2.00x, etc.)
+    (crash_multiplier.min(10000.0) as u16).max(100)
+}
+
 // === Account Structures ===
 
 #[derive(Accounts)]
@@ -3740,6 +3870,7 @@ pub enum GameType {
     DiceRoll,
     Limbo,
     PvPChallenge,
+    Crash,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -3834,6 +3965,19 @@ pub struct LimboPlayed {
     pub amount: u64,
     pub target_multiplier: u16,
     pub result_multiplier: u16,
+    pub payout: u64,
+    pub won: bool,
+    pub server_seed: [u8; 32],
+    pub client_seed: [u8; 32],
+    pub slot: u64,
+}
+
+#[event]
+pub struct CrashPlayed {
+    pub player: Pubkey,
+    pub amount: u64,
+    pub cashout_multiplier: u16,
+    pub crash_point: u16,
     pub payout: u64,
     pub won: bool,
     pub server_seed: [u8; 32],

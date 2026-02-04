@@ -101,7 +101,7 @@ export interface LeaderboardEntry {
 
 export interface GameRecord {
   player: string;
-  gameType: 'CoinFlip' | 'DiceRoll' | 'Limbo';
+  gameType: 'CoinFlip' | 'DiceRoll' | 'Limbo' | 'Crash';
   amount: number;
   choice: number;
   result: number;
@@ -349,7 +349,55 @@ export class AgentCasino {
 
     const signature = await this.provider.sendAndConfirm(tx);
     const gameRecord = await this.fetchGameRecord(gameRecordPda);
-    
+
+    return this.formatGameResult(signature, gameRecord, clientSeed);
+  }
+
+  /**
+   * Play crash - set your cashout multiplier and hope the game doesn't crash before you cash out
+   * Most games crash early (1x-3x) but occasionally can go very high (50x+)
+   * @param amountSol Amount to bet in SOL
+   * @param cashoutMultiplier Target cashout multiplier (1.01 to 100)
+   * @returns Game result with crash point
+   */
+  async crash(amountSol: number, cashoutMultiplier: number): Promise<GameResult> {
+    if (cashoutMultiplier < 1.01 || cashoutMultiplier > 100) {
+      throw new Error('Cashout multiplier must be between 1.01 and 100');
+    }
+
+    const clientSeed = this.generateClientSeed();
+    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+    const cashoutBps = Math.floor(cashoutMultiplier * 100);
+
+    const house = await this.getHouseAccount();
+    const gameIndex = house.totalGames;
+
+    const [gameRecordPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('game'),
+        this.housePda.toBuffer(),
+        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
+      ],
+      PROGRAM_ID
+    );
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.buildGameTransaction(
+      'crash',
+      amountLamports,
+      cashoutBps,
+      clientSeed,
+      gameRecordPda,
+      agentStatsPda
+    );
+
+    const signature = await this.provider.sendAndConfirm(tx);
+    const gameRecord = await this.fetchGameRecord(gameRecordPda);
+
     return this.formatGameResult(signature, gameRecord, clientSeed);
   }
 
@@ -1264,6 +1312,7 @@ export class AgentCasino {
       coinFlip: Buffer.from([0x8a, 0x2c, 0x1d, 0x87, 0x54, 0x12, 0xf3, 0x01]),
       diceRoll: Buffer.from([0x9b, 0x3d, 0x2e, 0x98, 0x65, 0x23, 0x04, 0x12]),
       limbo: Buffer.from([0xac, 0x4e, 0x3f, 0xa9, 0x76, 0x34, 0x15, 0x23]),
+      crash: Buffer.from([0xbd, 0x5f, 0x40, 0xba, 0x87, 0x45, 0x26, 0x34]),
     };
 
     const instructionData = Buffer.concat([

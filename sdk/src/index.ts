@@ -110,6 +110,53 @@ export interface GameRecord {
   slot: number;
 }
 
+// Memory Slots types
+
+export type MemoryCategory = 'Strategy' | 'Technical' | 'Alpha' | 'Random';
+export type MemoryRarity = 'Common' | 'Rare' | 'Legendary';
+
+export interface MemoryPoolStats {
+  address: string;
+  authority: string;
+  pullPrice: number;       // in SOL
+  houseEdgeBps: number;
+  stakeAmount: number;     // in SOL
+  totalMemories: number;
+  totalPulls: number;
+  poolBalance: number;     // in SOL
+}
+
+export interface MemoryData {
+  address: string;
+  pool: string;
+  depositor: string;
+  index: number;
+  content: string;
+  category: MemoryCategory;
+  rarity: MemoryRarity;
+  stake: number;           // in SOL
+  timesPulled: number;
+  averageRating: number;   // 0-5
+  ratingCount: number;
+  active: boolean;
+  createdAt: number;
+}
+
+export interface MemoryPullResult {
+  txSignature: string;
+  memory: MemoryData;
+  pullPrice: number;       // in SOL
+  depositorShare: number;  // in SOL
+  houseTake: number;       // in SOL
+}
+
+export interface MemoryPullRecord {
+  puller: string;
+  memory: string;
+  rating: number | null;
+  timestamp: number;
+}
+
 // === Main SDK Class ===
 
 export class AgentCasino {
@@ -118,6 +165,7 @@ export class AgentCasino {
   private provider: AnchorProvider;
   private housePda: PublicKey;
   private vaultPda: PublicKey;
+  private memoryPoolPda: PublicKey;
   private config: CasinoConfig;
   private cachedBettingContext: BettingContext | null = null;
   private contextCacheTime: number = 0;
@@ -159,6 +207,10 @@ export class AgentCasino {
     );
     [this.vaultPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('vault'), this.housePda.toBuffer()],
+      programId
+    );
+    [this.memoryPoolPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('memory_pool')],
       programId
     );
   }
@@ -574,11 +626,485 @@ export class AgentCasino {
       Buffer.from(clientSeed, 'hex'),
       new PublicKey(playerPubkey).toBuffer(),
     ]);
-    
+
     const hash = createHash('sha256').update(combined).digest();
     const computedResult = hash[0] % 2; // For coin flip
-    
+
     return computedResult === expectedResult;
+  }
+
+  // === Memory Slots Methods ===
+
+  /**
+   * Create a memory pool (authority only)
+   * @param pullPriceSol Price to pull a random memory in SOL
+   * @param houseEdgeBps House edge in basis points (e.g., 1000 = 10%)
+   */
+  async createMemoryPool(pullPriceSol: number, houseEdgeBps: number): Promise<string> {
+    const pullPrice = Math.floor(pullPriceSol * LAMPORTS_PER_SOL);
+
+    const discriminator = Buffer.from([0xc5, 0xd7, 0x6a, 0x3a, 0x1f, 0x8b, 0x4e, 0x2c]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      new BN(pullPrice).toArrayLike(Buffer, 'le', 8),
+      Buffer.from(new Uint16Array([houseEdgeBps]).buffer),
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Deposit a memory into the pool
+   * @param content Memory content (max 2000 chars)
+   * @param category Memory category
+   * @param rarity Memory rarity claim
+   */
+  async depositMemory(
+    content: string,
+    category: MemoryCategory,
+    rarity: MemoryRarity
+  ): Promise<{ txSignature: string; memoryAddress: string }> {
+    if (content.length === 0 || content.length > 500) {
+      throw new Error('Memory content must be 1-500 characters');
+    }
+
+    const pool = await this.getMemoryPoolAccount();
+    const memoryIndex = pool.totalMemories;
+
+    const [memoryPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('memory'),
+        this.memoryPoolPda.toBuffer(),
+        new BN(memoryIndex).toArrayLike(Buffer, 'le', 8),
+      ],
+      PROGRAM_ID
+    );
+
+    // Encode category (0=Strategy, 1=Technical, 2=Alpha, 3=Random)
+    const categoryMap: Record<MemoryCategory, number> = {
+      Strategy: 0, Technical: 1, Alpha: 2, Random: 3,
+    };
+    const categoryByte = categoryMap[category];
+
+    // Encode rarity (0=Common, 1=Rare, 2=Legendary)
+    const rarityMap: Record<MemoryRarity, number> = {
+      Common: 0, Rare: 1, Legendary: 2,
+    };
+    const rarityByte = rarityMap[rarity];
+
+    // Encode content with length prefix
+    const contentBytes = Buffer.from(content, 'utf8');
+    const contentLenBuf = Buffer.alloc(4);
+    contentLenBuf.writeUInt32LE(contentBytes.length);
+
+    const discriminator = Buffer.from([0xd6, 0xe8, 0x7b, 0x4b, 0x2e, 0x9c, 0x5f, 0x3d]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      contentLenBuf,
+      contentBytes,
+      Buffer.from([categoryByte]),
+      Buffer.from([rarityByte]),
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: true },
+        { pubkey: memoryPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    const signature = await this.provider.sendAndConfirm(tx);
+
+    return {
+      txSignature: signature,
+      memoryAddress: memoryPda.toString(),
+    };
+  }
+
+  /**
+   * Pull a random memory from the pool
+   * @param memoryAddress The memory PDA address to pull
+   */
+  async pullMemory(memoryAddress: string): Promise<MemoryPullResult> {
+    const memoryPubkey = new PublicKey(memoryAddress);
+    const clientSeed = this.generateClientSeed();
+
+    // Fetch memory to get depositor
+    const memory = await this.fetchMemory(memoryPubkey);
+
+    const [pullRecordPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('mem_pull'),
+        memoryPubkey.toBuffer(),
+        this.wallet.publicKey.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    const discriminator = Buffer.from([0xe7, 0xf9, 0x8c, 0x5c, 0x3f, 0xad, 0x6e, 0x4e]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      clientSeed,
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: true },
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: true },
+        { pubkey: memoryPubkey, isSigner: false, isWritable: true },
+        { pubkey: memory.depositor, isSigner: false, isWritable: true },
+        { pubkey: pullRecordPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    const signature = await this.provider.sendAndConfirm(tx);
+
+    // Fetch pool for pricing info
+    const pool = await this.getMemoryPoolAccount();
+    const pullPrice = pool.pullPrice / LAMPORTS_PER_SOL;
+    const houseTake = pullPrice * pool.houseEdgeBps / 10000;
+    const depositorShare = pullPrice - houseTake;
+
+    return {
+      txSignature: signature,
+      memory: await this.getMemory(memoryAddress),
+      pullPrice,
+      depositorShare,
+      houseTake,
+    };
+  }
+
+  /**
+   * Rate a memory you pulled
+   * @param memoryAddress The memory PDA address
+   * @param rating Rating 1-5 (1-2 bad, 3 neutral, 4-5 good)
+   */
+  async rateMemory(memoryAddress: string, rating: number): Promise<string> {
+    if (rating < 1 || rating > 5) {
+      throw new Error('Rating must be 1-5');
+    }
+
+    const memoryPubkey = new PublicKey(memoryAddress);
+
+    const [pullRecordPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('mem_pull'),
+        memoryPubkey.toBuffer(),
+        this.wallet.publicKey.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    const discriminator = Buffer.from([0xf8, 0x0a, 0x9d, 0x6d, 0x4e, 0xbe, 0x7f, 0x5f]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      Buffer.from([rating]),
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: true },
+        { pubkey: memoryPubkey, isSigner: false, isWritable: true },
+        { pubkey: pullRecordPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Withdraw an unpulled memory
+   * @param memoryAddress The memory PDA address
+   */
+  async withdrawMemory(memoryAddress: string): Promise<{ txSignature: string; refund: number; fee: number }> {
+    const memoryPubkey = new PublicKey(memoryAddress);
+
+    const discriminator = Buffer.from([0x09, 0x1b, 0xae, 0x7e, 0x5f, 0xcf, 0x80, 0x60]);
+    const instructionData = discriminator;
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: true },
+        { pubkey: memoryPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    const signature = await this.provider.sendAndConfirm(tx);
+
+    // Calculate refund (95% of stake, 5% fee)
+    const memory = await this.fetchMemory(memoryPubkey);
+    const stake = memory.stake.toNumber() / LAMPORTS_PER_SOL;
+    const fee = stake * 0.05;
+    const refund = stake - fee;
+
+    return { txSignature: signature, refund, fee };
+  }
+
+  /**
+   * Get memory pool stats
+   */
+  async getMemoryPool(): Promise<MemoryPoolStats> {
+    const pool = await this.getMemoryPoolAccount();
+    return {
+      address: this.memoryPoolPda.toString(),
+      authority: pool.authority.toString(),
+      pullPrice: pool.pullPrice / LAMPORTS_PER_SOL,
+      houseEdgeBps: pool.houseEdgeBps,
+      stakeAmount: pool.stakeAmount / LAMPORTS_PER_SOL,
+      totalMemories: pool.totalMemories.toNumber(),
+      totalPulls: pool.totalPulls.toNumber(),
+      poolBalance: pool.poolBalance / LAMPORTS_PER_SOL,
+    };
+  }
+
+  /**
+   * Get a specific memory by address
+   */
+  async getMemory(memoryAddress: string): Promise<MemoryData> {
+    const memoryPubkey = new PublicKey(memoryAddress);
+    const memory = await this.fetchMemory(memoryPubkey);
+    return this.formatMemoryData(memoryAddress, memory);
+  }
+
+  /**
+   * Get all memories deposited by a specific agent
+   */
+  async getMyMemories(): Promise<MemoryData[]> {
+    return this.getMemoriesByDepositor(this.wallet.publicKey);
+  }
+
+  /**
+   * Get memories deposited by a specific address
+   */
+  async getMemoriesByDepositor(depositor: PublicKey): Promise<MemoryData[]> {
+    const pool = await this.getMemoryPoolAccount();
+    const totalMemories = pool.totalMemories.toNumber();
+    const memories: MemoryData[] = [];
+
+    for (let i = 0; i < totalMemories; i++) {
+      try {
+        const [memoryPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('memory'),
+            this.memoryPoolPda.toBuffer(),
+            new BN(i).toArrayLike(Buffer, 'le', 8),
+          ],
+          PROGRAM_ID
+        );
+
+        const memory = await this.fetchMemory(memoryPda);
+        if (memory.depositor.equals(depositor)) {
+          memories.push(this.formatMemoryData(memoryPda.toString(), memory));
+        }
+      } catch (e) {
+        // Skip failed fetches
+      }
+    }
+
+    return memories;
+  }
+
+  /**
+   * Get all memories you've pulled
+   */
+  async getMyPulls(): Promise<MemoryPullRecord[]> {
+    // This would require scanning or maintaining an index
+    // For now, return empty array - full implementation would need getProgramAccounts
+    return [];
+  }
+
+  /**
+   * Get list of active memories available to pull
+   */
+  async getActiveMemories(limit: number = 20): Promise<MemoryData[]> {
+    const pool = await this.getMemoryPoolAccount();
+    const totalMemories = pool.totalMemories.toNumber();
+    const memories: MemoryData[] = [];
+
+    for (let i = totalMemories - 1; i >= 0 && memories.length < limit; i--) {
+      try {
+        const [memoryPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('memory'),
+            this.memoryPoolPda.toBuffer(),
+            new BN(i).toArrayLike(Buffer, 'le', 8),
+          ],
+          PROGRAM_ID
+        );
+
+        const memory = await this.fetchMemory(memoryPda);
+        if (memory.active) {
+          memories.push(this.formatMemoryData(memoryPda.toString(), memory));
+        }
+      } catch (e) {
+        // Skip failed fetches
+      }
+    }
+
+    return memories;
+  }
+
+  // === Memory Slots Private Helpers ===
+
+  private async getMemoryPoolAccount(): Promise<any> {
+    const accountInfo = await this.connection.getAccountInfo(this.memoryPoolPda);
+    if (!accountInfo) throw new Error('Memory pool not initialized');
+    return this.parseMemoryPoolAccount(accountInfo.data);
+  }
+
+  private parseMemoryPoolAccount(data: Buffer): any {
+    let offset = 8; // Skip discriminator
+
+    const authority = new PublicKey(data.slice(offset, offset + 32));
+    offset += 32;
+
+    const pullPrice = new BN(data.slice(offset, offset + 8), 'le').toNumber();
+    offset += 8;
+
+    const houseEdgeBps = data.readUInt16LE(offset);
+    offset += 2;
+
+    const stakeAmount = new BN(data.slice(offset, offset + 8), 'le').toNumber();
+    offset += 8;
+
+    const totalMemories = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const totalPulls = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const poolBalance = new BN(data.slice(offset, offset + 8), 'le').toNumber();
+
+    return {
+      authority,
+      pullPrice,
+      houseEdgeBps,
+      stakeAmount,
+      totalMemories,
+      totalPulls,
+      poolBalance,
+    };
+  }
+
+  private async fetchMemory(pda: PublicKey): Promise<any> {
+    const accountInfo = await this.connection.getAccountInfo(pda);
+    if (!accountInfo) throw new Error('Memory not found');
+    return this.parseMemoryAccount(accountInfo.data);
+  }
+
+  private parseMemoryAccount(data: Buffer): any {
+    let offset = 8; // Skip discriminator
+
+    const pool = new PublicKey(data.slice(offset, offset + 32));
+    offset += 32;
+
+    const depositor = new PublicKey(data.slice(offset, offset + 32));
+    offset += 32;
+
+    const index = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    // Content is 500 bytes fixed
+    const contentBytes = data.slice(offset, offset + 500);
+    offset += 500;
+
+    const contentLength = data.readUInt16LE(offset);
+    offset += 2;
+
+    const content = contentBytes.slice(0, contentLength).toString('utf8');
+
+    const category = data[offset];
+    offset += 1;
+
+    const rarity = data[offset];
+    offset += 1;
+
+    const stake = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const timesPulled = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const totalRating = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const ratingCount = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const active = data[offset] === 1;
+    offset += 1;
+
+    const createdAt = new BN(data.slice(offset, offset + 8), 'le');
+
+    return {
+      pool,
+      depositor,
+      index,
+      content,
+      category,
+      rarity,
+      stake,
+      timesPulled,
+      totalRating,
+      ratingCount,
+      active,
+      createdAt,
+    };
+  }
+
+  private formatMemoryData(address: string, memory: any): MemoryData {
+    const categoryNames: MemoryCategory[] = ['Strategy', 'Technical', 'Alpha', 'Random'];
+    const rarityNames: MemoryRarity[] = ['Common', 'Rare', 'Legendary'];
+
+    const ratingCount = memory.ratingCount.toNumber();
+    const averageRating = ratingCount > 0
+      ? memory.totalRating.toNumber() / ratingCount
+      : 0;
+
+    return {
+      address,
+      pool: memory.pool.toString(),
+      depositor: memory.depositor.toString(),
+      index: memory.index.toNumber(),
+      content: memory.content,
+      category: categoryNames[memory.category] || 'Random',
+      rarity: rarityNames[memory.rarity] || 'Common',
+      stake: memory.stake.toNumber() / LAMPORTS_PER_SOL,
+      timesPulled: memory.timesPulled.toNumber(),
+      averageRating,
+      ratingCount,
+      active: memory.active,
+      createdAt: memory.createdAt.toNumber(),
+    };
   }
 
   // === Private Helpers ===

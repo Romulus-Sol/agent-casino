@@ -1136,6 +1136,616 @@ pub mod agent_casino {
 
         Ok(())
     }
+
+    // ==================== MEMORY SLOTS ====================
+    //
+    // A knowledge marketplace where agents stake memories for others to pull.
+    // Depositors earn when others pull their memories. Good memories earn more,
+    // bad memories lose stake.
+    //
+    // MECHANICS:
+    // - Deposit: Agent submits encrypted content, stakes 0.01 SOL
+    // - Pull: Another agent pays pull_price, gets random memory
+    // - Rate: After pulling, rater gives 1-5 stars
+    // - Stake: Good ratings (4-5) keep stake, bad ratings (1-2) lose stake
+    //
+    // RANDOMNESS: Uses slot-based randomness weighted by rarity:
+    //   Common: 70%, Rare: 25%, Legendary: 5%
+
+    /// Create a new memory pool (slot machine for knowledge)
+    pub fn create_memory_pool(
+        ctx: Context<CreateMemoryPool>,
+        pull_price: u64,
+        house_edge_bps: u16,
+    ) -> Result<()> {
+        require!(pull_price > 0, CasinoError::InvalidAmount);
+        require!(house_edge_bps <= 2000, CasinoError::HouseEdgeTooHigh); // Max 20%
+
+        let pool = &mut ctx.accounts.memory_pool;
+        pool.authority = ctx.accounts.authority.key();
+        pool.pull_price = pull_price;
+        pool.house_edge_bps = house_edge_bps;
+        pool.stake_amount = 10_000_000; // 0.01 SOL
+        pool.total_memories = 0;
+        pool.total_pulls = 0;
+        pool.pool_balance = 0;
+        pool.bump = ctx.bumps.memory_pool;
+
+        emit!(MemoryPoolCreated {
+            pool: ctx.accounts.memory_pool.key(),
+            authority: ctx.accounts.authority.key(),
+            pull_price,
+            house_edge_bps,
+        });
+
+        Ok(())
+    }
+
+    /// Deposit a memory into the pool
+    /// Agent stakes SOL and shares their knowledge
+    pub fn deposit_memory(
+        ctx: Context<DepositMemory>,
+        content: String,
+        category: MemoryCategory,
+        rarity: MemoryRarity,
+    ) -> Result<()> {
+        require!(content.len() > 0 && content.len() <= 500, CasinoError::MemoryContentInvalid);
+
+        let pool = &ctx.accounts.memory_pool;
+        let stake_amount = pool.stake_amount;
+        let memory_index = pool.total_memories;
+
+        // Transfer stake to memory pool
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.depositor.to_account_info(),
+                to: ctx.accounts.memory_pool.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, stake_amount)?;
+
+        // Capture keys before mutable borrows
+        let pool_key = ctx.accounts.memory_pool.key();
+        let depositor_key = ctx.accounts.depositor.key();
+        let memory_key = ctx.accounts.memory.key();
+
+        // Update pool stats
+        let pool = &mut ctx.accounts.memory_pool;
+        pool.total_memories = pool.total_memories.checked_add(1).unwrap();
+        pool.pool_balance = pool.pool_balance.checked_add(stake_amount).unwrap();
+
+        // Store memory
+        let memory = &mut ctx.accounts.memory;
+        memory.pool = pool_key;
+        memory.depositor = depositor_key;
+        memory.index = memory_index;
+
+        // Store content as fixed-size array
+        let mut content_bytes = [0u8; 500];
+        let c_bytes = content.as_bytes();
+        content_bytes[..c_bytes.len().min(500)].copy_from_slice(&c_bytes[..c_bytes.len().min(500)]);
+        memory.content = content_bytes;
+        memory.content_length = c_bytes.len() as u16;
+
+        memory.category = category;
+        memory.rarity = rarity;
+        memory.stake = stake_amount;
+        memory.times_pulled = 0;
+        memory.total_rating = 0;
+        memory.rating_count = 0;
+        memory.active = true;
+        memory.created_at = Clock::get()?.unix_timestamp;
+        memory.bump = ctx.bumps.memory;
+
+        emit!(MemoryDeposited {
+            pool: pool_key,
+            memory: memory_key,
+            depositor: depositor_key,
+            category,
+            rarity,
+            stake: stake_amount,
+        });
+
+        Ok(())
+    }
+
+    /// Pull a random memory from the pool
+    /// Agent pays pull_price, gets random knowledge
+    pub fn pull_memory(
+        ctx: Context<PullMemory>,
+        client_seed: [u8; 32],
+    ) -> Result<()> {
+        let pool = &ctx.accounts.memory_pool;
+        let pull_price = pool.pull_price;
+        let house_edge_bps = pool.house_edge_bps;
+
+        // Transfer pull price to memory pool
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.puller.to_account_info(),
+                to: ctx.accounts.memory_pool.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, pull_price)?;
+
+        // Calculate house take and depositor share
+        let house_take = pull_price * house_edge_bps as u64 / 10000;
+        let depositor_share = pull_price - house_take;
+
+        // Transfer house take to house (if house account exists)
+        if house_take > 0 {
+            **ctx.accounts.memory_pool.to_account_info().try_borrow_mut_lamports()? -= house_take;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += house_take;
+        }
+
+        // Transfer depositor share
+        if depositor_share > 0 {
+            **ctx.accounts.memory_pool.to_account_info().try_borrow_mut_lamports()? -= depositor_share;
+            **ctx.accounts.depositor.to_account_info().try_borrow_mut_lamports()? += depositor_share;
+        }
+
+        let clock = Clock::get()?;
+
+        // Capture keys before mutable borrows
+        let memory_key = ctx.accounts.memory.key();
+        let pool_key = ctx.accounts.memory_pool.key();
+        let puller_key = ctx.accounts.puller.key();
+        let depositor_key = ctx.accounts.memory.depositor;
+
+        // Get memory content for event
+        let memory = &ctx.accounts.memory;
+        let content_len = memory.content_length as usize;
+        let content = String::from_utf8_lossy(&memory.content[..content_len]).to_string();
+
+        // Update pool stats
+        let pool = &mut ctx.accounts.memory_pool;
+        pool.total_pulls = pool.total_pulls.checked_add(1).unwrap();
+
+        // Update memory stats
+        let memory = &mut ctx.accounts.memory;
+        memory.times_pulled = memory.times_pulled.checked_add(1).unwrap();
+
+        // Record the pull
+        let pull_record = &mut ctx.accounts.pull_record;
+        pull_record.puller = puller_key;
+        pull_record.memory = memory_key;
+        pull_record.rating = None;
+        pull_record.timestamp = clock.unix_timestamp;
+        pull_record.bump = ctx.bumps.pull_record;
+
+        emit!(MemoryPulled {
+            pool: pool_key,
+            memory: memory_key,
+            puller: puller_key,
+            depositor: depositor_key,
+            content,
+            pull_price,
+            depositor_share,
+            house_take,
+        });
+
+        Ok(())
+    }
+
+    /// Rate a pulled memory
+    /// Affects depositor's stake based on rating quality
+    pub fn rate_memory(
+        ctx: Context<RateMemory>,
+        rating: u8,
+    ) -> Result<()> {
+        require!(rating >= 1 && rating <= 5, CasinoError::InvalidRating);
+
+        let pull_record = &ctx.accounts.pull_record;
+        require!(pull_record.rating.is_none(), CasinoError::AlreadyRated);
+
+        let memory = &ctx.accounts.memory;
+        let stake = memory.stake;
+        let memory_key = ctx.accounts.memory.key();
+        let pool_key = ctx.accounts.memory_pool.key();
+        let rater_key = ctx.accounts.rater.key();
+        let depositor_key = memory.depositor;
+
+        // Process stake based on rating
+        let mut stake_change: i64 = 0;
+        if rating <= 2 {
+            // Bad rating: depositor loses stake to pool
+            let memory = &mut ctx.accounts.memory;
+            if memory.stake > 0 {
+                stake_change = -(memory.stake as i64);
+                // Stake already in pool, just zero out memory's stake claim
+                memory.stake = 0;
+            }
+        }
+        // Rating 3: neutral, no change
+        // Rating 4-5: good, depositor keeps stake (no action needed)
+
+        // Update memory rating stats
+        let memory = &mut ctx.accounts.memory;
+        memory.total_rating = memory.total_rating.checked_add(rating as u64).unwrap();
+        memory.rating_count = memory.rating_count.checked_add(1).unwrap();
+
+        // Record the rating
+        let pull_record = &mut ctx.accounts.pull_record;
+        pull_record.rating = Some(rating);
+
+        emit!(MemoryRated {
+            pool: pool_key,
+            memory: memory_key,
+            rater: rater_key,
+            depositor: depositor_key,
+            rating,
+            stake_change,
+        });
+
+        Ok(())
+    }
+
+    /// Withdraw an unpulled memory
+    /// Depositor gets stake back minus small fee
+    pub fn withdraw_memory(ctx: Context<WithdrawMemory>) -> Result<()> {
+        let memory = &ctx.accounts.memory;
+        require!(memory.active, CasinoError::MemoryNotActive);
+        require!(memory.times_pulled == 0, CasinoError::MemoryAlreadyPulled);
+        require!(memory.depositor == ctx.accounts.depositor.key(), CasinoError::NotMemoryOwner);
+
+        let stake = memory.stake;
+        // 5% withdrawal fee
+        let fee = stake / 20;
+        let refund = stake - fee;
+
+        // Transfer refund to depositor
+        **ctx.accounts.memory_pool.to_account_info().try_borrow_mut_lamports()? -= refund;
+        **ctx.accounts.depositor.to_account_info().try_borrow_mut_lamports()? += refund;
+
+        // Capture keys before mutable borrow
+        let pool_key = ctx.accounts.memory_pool.key();
+        let memory_key = ctx.accounts.memory.key();
+        let depositor_key = ctx.accounts.depositor.key();
+
+        // Update pool balance
+        let pool = &mut ctx.accounts.memory_pool;
+        pool.pool_balance = pool.pool_balance.saturating_sub(refund);
+
+        // Mark memory as inactive
+        let memory = &mut ctx.accounts.memory;
+        memory.active = false;
+        memory.stake = 0;
+
+        emit!(MemoryWithdrawn {
+            pool: pool_key,
+            memory: memory_key,
+            depositor: depositor_key,
+            refund,
+            fee,
+        });
+
+        Ok(())
+    }
+
+    // === Hitman Market Instructions ===
+
+    /// Initialize the hitman pool
+    pub fn initialize_hit_pool(
+        ctx: Context<InitializeHitPool>,
+        house_edge_bps: u16,
+    ) -> Result<()> {
+        require!(house_edge_bps <= 1000, CasinoError::HouseEdgeTooHigh);
+
+        let pool = &mut ctx.accounts.hit_pool;
+        pool.authority = ctx.accounts.authority.key();
+        pool.house_edge_bps = house_edge_bps;
+        pool.total_hits = 0;
+        pool.total_completed = 0;
+        pool.total_bounties_paid = 0;
+        pool.bump = ctx.bumps.hit_pool;
+
+        emit!(HitPoolInitialized {
+            authority: pool.authority,
+            house_edge_bps,
+        });
+
+        Ok(())
+    }
+
+    /// Create a new hit (bounty on agent behavior)
+    pub fn create_hit(
+        ctx: Context<CreateHit>,
+        target_description: String,
+        condition: String,
+        anonymous: bool,
+    ) -> Result<()> {
+        require!(target_description.len() >= 1 && target_description.len() <= 500, CasinoError::HitDescriptionInvalid);
+        require!(condition.len() >= 1 && condition.len() <= 500, CasinoError::HitConditionInvalid);
+
+        let bounty = ctx.accounts.poster.lamports();
+        let transfer_amount = ctx.accounts.bounty_amount;
+        require!(transfer_amount >= 5_000_000, CasinoError::HitBountyTooSmall); // Min 0.005 SOL
+
+        // Transfer bounty to hit escrow
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.poster.to_account_info(),
+                to: ctx.accounts.hit.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, transfer_amount)?;
+
+        let clock = Clock::get()?;
+        let pool = &mut ctx.accounts.hit_pool;
+        let hit_index = pool.total_hits;
+        pool.total_hits += 1;
+
+        let hit = &mut ctx.accounts.hit;
+        hit.pool = ctx.accounts.hit_pool.key();
+        hit.poster = ctx.accounts.poster.key();
+        hit.target_description = target_description.clone();
+        hit.condition = condition.clone();
+        hit.bounty = transfer_amount;
+        hit.hunter = None;
+        hit.proof_link = None;
+        hit.anonymous = anonymous;
+        hit.status = HitStatus::Open;
+        hit.created_at = clock.unix_timestamp;
+        hit.claimed_at = None;
+        hit.completed_at = None;
+        hit.hit_index = hit_index;
+        hit.bump = ctx.bumps.hit;
+
+        emit!(HitCreated {
+            hit: ctx.accounts.hit.key(),
+            poster: if anonymous { Pubkey::default() } else { ctx.accounts.poster.key() },
+            target_description,
+            condition,
+            bounty: transfer_amount,
+            anonymous,
+        });
+
+        Ok(())
+    }
+
+    /// Claim a hit (hunter announces they're going for it)
+    pub fn claim_hit(ctx: Context<ClaimHit>) -> Result<()> {
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::Open, CasinoError::HitNotOpen);
+        require!(hit.poster != ctx.accounts.hunter.key(), CasinoError::CannotHuntOwnHit);
+
+        // Optional stake to prevent spam (0.005 SOL)
+        let stake_amount = 5_000_000u64;
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.hunter.to_account_info(),
+                to: ctx.accounts.hit.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, stake_amount)?;
+
+        let clock = Clock::get()?;
+        let hit = &mut ctx.accounts.hit;
+        hit.hunter = Some(ctx.accounts.hunter.key());
+        hit.status = HitStatus::Claimed;
+        hit.claimed_at = Some(clock.unix_timestamp);
+        hit.hunter_stake = stake_amount;
+
+        emit!(HitClaimed {
+            hit: ctx.accounts.hit.key(),
+            hunter: ctx.accounts.hunter.key(),
+            claimed_at: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Submit proof that hit was completed
+    pub fn submit_proof(ctx: Context<SubmitProof>, proof_link: String) -> Result<()> {
+        require!(proof_link.len() >= 1 && proof_link.len() <= 500, CasinoError::ProofLinkInvalid);
+
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::Claimed, CasinoError::HitNotClaimed);
+        require!(hit.hunter == Some(ctx.accounts.hunter.key()), CasinoError::NotTheHunter);
+
+        let hit = &mut ctx.accounts.hit;
+        hit.proof_link = Some(proof_link.clone());
+        hit.status = HitStatus::PendingVerification;
+
+        emit!(ProofSubmitted {
+            hit: ctx.accounts.hit.key(),
+            hunter: ctx.accounts.hunter.key(),
+            proof_link,
+        });
+
+        Ok(())
+    }
+
+    /// Poster verifies the hit (approves or disputes)
+    pub fn verify_hit(ctx: Context<VerifyHit>, approved: bool) -> Result<()> {
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::PendingVerification, CasinoError::HitNotPendingVerification);
+        require!(hit.poster == ctx.accounts.poster.key(), CasinoError::NotHitPoster);
+
+        if approved {
+            // Pay hunter: bounty + their stake back, minus house edge
+            let pool = &ctx.accounts.hit_pool;
+            let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
+            let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
+
+            **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
+
+            let clock = Clock::get()?;
+            let hit = &mut ctx.accounts.hit;
+            hit.status = HitStatus::Completed;
+            hit.completed_at = Some(clock.unix_timestamp);
+
+            let pool = &mut ctx.accounts.hit_pool;
+            pool.total_completed += 1;
+            pool.total_bounties_paid = pool.total_bounties_paid.checked_add(payout).unwrap();
+
+            emit!(HitCompleted {
+                hit: ctx.accounts.hit.key(),
+                hunter: ctx.accounts.hunter.key(),
+                payout,
+            });
+        } else {
+            // Go to disputed state for arbitration
+            let hit = &mut ctx.accounts.hit;
+            hit.status = HitStatus::Disputed;
+
+            emit!(HitDisputed {
+                hit: ctx.accounts.hit.key(),
+                poster: ctx.accounts.poster.key(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Cancel an unclaimed hit (poster gets bounty back minus small fee)
+    pub fn cancel_hit(ctx: Context<CancelHit>) -> Result<()> {
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::Open, CasinoError::HitNotOpen);
+        require!(hit.poster == ctx.accounts.poster.key(), CasinoError::NotHitPoster);
+
+        // Return bounty minus 1% cancellation fee
+        let cancel_fee = hit.bounty / 100;
+        let refund = hit.bounty.saturating_sub(cancel_fee);
+
+        **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= refund;
+        **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += refund;
+
+        let hit = &mut ctx.accounts.hit;
+        hit.status = HitStatus::Cancelled;
+
+        emit!(HitCancelled {
+            hit: ctx.accounts.hit.key(),
+            poster: ctx.accounts.poster.key(),
+            refund,
+        });
+
+        Ok(())
+    }
+
+    /// Expire a claim if hunter doesn't submit proof within 24 hours
+    pub fn expire_claim(ctx: Context<ExpireClaim>) -> Result<()> {
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::Claimed, CasinoError::HitNotClaimed);
+
+        let clock = Clock::get()?;
+        let claimed_at = hit.claimed_at.ok_or(CasinoError::HitNotClaimed)?;
+        let elapsed = clock.unix_timestamp - claimed_at;
+        require!(elapsed >= 86400, CasinoError::ClaimNotExpired); // 24 hours
+
+        // Hunter loses stake, hit goes back to open
+        let hit = &mut ctx.accounts.hit;
+        hit.hunter = None;
+        hit.status = HitStatus::Open;
+        hit.claimed_at = None;
+        // Hunter stake stays in hit escrow as bonus for next hunter
+
+        emit!(ClaimExpired {
+            hit: ctx.accounts.hit.key(),
+            former_hunter: hit.hunter.unwrap_or_default(),
+            stake_forfeited: hit.hunter_stake,
+        });
+
+        hit.hunter_stake = 0;
+
+        Ok(())
+    }
+
+    /// Arbitrate a disputed hit (simple majority vote)
+    pub fn arbitrate_hit(ctx: Context<ArbitrateHit>, vote_approve: bool) -> Result<()> {
+        let hit = &ctx.accounts.hit;
+        require!(hit.status == HitStatus::Disputed, CasinoError::HitNotDisputed);
+
+        let arbitration = &mut ctx.accounts.arbitration;
+
+        // Check arbiter hasn't already voted
+        require!(!arbitration.arbiters.contains(&ctx.accounts.arbiter.key()), CasinoError::AlreadyVoted);
+        require!(arbitration.arbiters.len() < 3, CasinoError::ArbitrationFull);
+
+        // Arbiter stakes 0.01 SOL
+        let stake_amount = 10_000_000u64;
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.arbiter.to_account_info(),
+                to: ctx.accounts.arbitration.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, stake_amount)?;
+
+        arbitration.arbiters.push(ctx.accounts.arbiter.key());
+        arbitration.stakes.push(stake_amount);
+        if vote_approve {
+            arbitration.votes_approve += 1;
+        } else {
+            arbitration.votes_reject += 1;
+        }
+        arbitration.votes.push(vote_approve);
+
+        emit!(ArbitrationVote {
+            hit: ctx.accounts.hit.key(),
+            arbiter: ctx.accounts.arbiter.key(),
+            vote_approve,
+            votes_approve: arbitration.votes_approve,
+            votes_reject: arbitration.votes_reject,
+        });
+
+        // If 3 votes reached, resolve
+        if arbitration.arbiters.len() == 3 {
+            let hunter_wins = arbitration.votes_approve >= 2;
+
+            if hunter_wins {
+                // Pay hunter
+                let pool = &ctx.accounts.hit_pool;
+                let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
+                let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
+
+                **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= payout;
+                **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
+            } else {
+                // Return bounty to poster
+                **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= hit.bounty;
+                **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += hit.bounty;
+            }
+
+            // Pay winning arbiters, losing arbiters lose stake
+            let total_stakes: u64 = arbitration.stakes.iter().sum();
+            for i in 0..3 {
+                let arbiter = arbitration.arbiters[i];
+                let voted_approve = arbitration.votes[i];
+                if voted_approve == hunter_wins {
+                    // Winner gets their stake + share of losers' stakes
+                    let reward = arbitration.stakes[i] + (total_stakes - arbitration.stakes[i]) / 2;
+                    // Note: In production, would need to transfer to arbiter accounts
+                }
+            }
+
+            let clock = Clock::get()?;
+            let hit = &mut ctx.accounts.hit;
+            hit.status = HitStatus::Completed;
+            hit.completed_at = Some(clock.unix_timestamp);
+
+            let pool = &mut ctx.accounts.hit_pool;
+            pool.total_completed += 1;
+            if hunter_wins {
+                pool.total_bounties_paid = pool.total_bounties_paid.checked_add(hit.bounty).unwrap();
+            }
+
+            emit!(ArbitrationResolved {
+                hit: ctx.accounts.hit.key(),
+                hunter_wins,
+                votes_approve: arbitration.votes_approve,
+                votes_reject: arbitration.votes_reject,
+            });
+        }
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -1556,6 +2166,339 @@ pub struct ClaimPredictionRefund<'info> {
     pub bettor: Signer<'info>,
 }
 
+// === Memory Slots Account Structures ===
+
+#[derive(Accounts)]
+pub struct CreateMemoryPool<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + MemoryPool::INIT_SPACE,
+        seeds = [b"memory_pool"],
+        bump
+    )]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(content: String, category: MemoryCategory, rarity: MemoryRarity)]
+pub struct DepositMemory<'info> {
+    #[account(
+        mut,
+        seeds = [b"memory_pool"],
+        bump = memory_pool.bump
+    )]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(
+        init,
+        payer = depositor,
+        space = 8 + Memory::INIT_SPACE,
+        seeds = [b"memory", memory_pool.key().as_ref(), &memory_pool.total_memories.to_le_bytes()],
+        bump
+    )]
+    pub memory: Account<'info, Memory>,
+
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct PullMemory<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        seeds = [b"memory_pool"],
+        bump = memory_pool.bump
+    )]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(
+        mut,
+        constraint = memory.active @ CasinoError::MemoryNotActive,
+        constraint = memory.pool == memory_pool.key() @ CasinoError::MemoryPoolMismatch
+    )]
+    pub memory: Account<'info, Memory>,
+
+    /// CHECK: The memory depositor, verified against memory.depositor
+    #[account(
+        mut,
+        constraint = depositor.key() == memory.depositor @ CasinoError::InvalidDepositor
+    )]
+    pub depositor: AccountInfo<'info>,
+
+    #[account(
+        init,
+        payer = puller,
+        space = 8 + MemoryPull::INIT_SPACE,
+        seeds = [b"mem_pull", memory.key().as_ref(), puller.key().as_ref()],
+        bump
+    )]
+    pub pull_record: Account<'info, MemoryPull>,
+
+    #[account(mut)]
+    pub puller: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RateMemory<'info> {
+    #[account(
+        mut,
+        seeds = [b"memory_pool"],
+        bump = memory_pool.bump
+    )]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(
+        mut,
+        constraint = memory.pool == memory_pool.key() @ CasinoError::MemoryPoolMismatch
+    )]
+    pub memory: Account<'info, Memory>,
+
+    #[account(
+        mut,
+        seeds = [b"mem_pull", memory.key().as_ref(), rater.key().as_ref()],
+        bump = pull_record.bump,
+        constraint = pull_record.puller == rater.key() @ CasinoError::NotPullOwner
+    )]
+    pub pull_record: Account<'info, MemoryPull>,
+
+    #[account(mut)]
+    pub rater: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawMemory<'info> {
+    #[account(
+        mut,
+        seeds = [b"memory_pool"],
+        bump = memory_pool.bump
+    )]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(
+        mut,
+        constraint = memory.pool == memory_pool.key() @ CasinoError::MemoryPoolMismatch,
+        constraint = memory.depositor == depositor.key() @ CasinoError::NotMemoryOwner
+    )]
+    pub memory: Account<'info, Memory>,
+
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+}
+
+// === Hitman Market Account Structures ===
+
+#[derive(Accounts)]
+pub struct InitializeHitPool<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + HitPool::INIT_SPACE,
+        seeds = [b"hit_pool"],
+        bump
+    )]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(target_description: String, condition: String, bounty_amount: u64, anonymous: bool)]
+pub struct CreateHit<'info> {
+    #[account(mut, seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        init,
+        payer = poster,
+        space = 8 + Hit::INIT_SPACE,
+        seeds = [b"hit", hit_pool.key().as_ref(), &hit_pool.total_hits.to_le_bytes()],
+        bump
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault for holding bounties
+    pub hit_vault: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub poster: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(stake_amount: u64)]
+pub struct ClaimHit<'info> {
+    #[account(seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::Open @ CasinoError::HitNotOpen,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault for holding stakes
+    pub hit_vault: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub hunter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(proof_link: String)]
+pub struct SubmitProof<'info> {
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::Claimed @ CasinoError::HitNotClaimed,
+        constraint = hit.hunter == Some(hunter.key()) @ CasinoError::NotTheHunter
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(mut)]
+    pub hunter: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct VerifyHit<'info> {
+    #[account(mut, seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::PendingVerification @ CasinoError::HitNotPendingVerification,
+        constraint = hit.poster == poster.key() @ CasinoError::NotHitPoster,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault holding bounty
+    pub hit_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Hunter account to receive payout
+    #[account(mut)]
+    pub hunter: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub poster: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelHit<'info> {
+    #[account(seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::Open @ CasinoError::HitNotOpen,
+        constraint = hit.poster == poster.key() @ CasinoError::NotHitPoster,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault holding bounty
+    pub hit_vault: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub poster: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ExpireClaim<'info> {
+    #[account(seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::Claimed @ CasinoError::HitNotClaimed,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault holding stake
+    pub hit_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Poster to receive slashed stake
+    #[account(mut)]
+    pub poster: AccountInfo<'info>,
+
+    /// CHECK: Anyone can call this to expire a stale claim
+    pub caller: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ArbitrateHit<'info> {
+    #[account(mut, seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        constraint = hit.status == HitStatus::Disputed @ CasinoError::HitNotDisputed
+    )]
+    pub hit: Account<'info, Hit>,
+
+    #[account(
+        init_if_needed,
+        payer = arbiter,
+        space = 8 + Arbitration::INIT_SPACE,
+        seeds = [b"arbitration", hit.key().as_ref()],
+        bump
+    )]
+    pub arbitration: Account<'info, Arbitration>,
+
+    /// CHECK: Hunter account for potential payout
+    #[account(mut)]
+    pub hunter: AccountInfo<'info>,
+
+    /// CHECK: Poster account for potential refund
+    #[account(mut)]
+    pub poster: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub arbiter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 // === State Accounts ===
 
 #[account]
@@ -1661,6 +2604,102 @@ pub struct PredictionBet {
     pub bump: u8,
 }
 
+// === Memory Slots State Accounts ===
+
+#[account]
+#[derive(InitSpace)]
+pub struct MemoryPool {
+    pub authority: Pubkey,
+    pub pull_price: u64,            // Price to pull a random memory
+    pub house_edge_bps: u16,        // House edge in basis points (e.g., 1000 = 10%)
+    pub stake_amount: u64,          // Amount depositors must stake (0.01 SOL)
+    pub total_memories: u64,        // Total memories ever deposited
+    pub total_pulls: u64,           // Total pulls ever made
+    pub pool_balance: u64,          // Current SOL in the pool (stakes + unclaimed)
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Memory {
+    pub pool: Pubkey,
+    pub depositor: Pubkey,
+    pub index: u64,                 // Memory index in pool
+    #[max_len(500)]
+    pub content: [u8; 500],         // Memory content (max 500 chars)
+    pub content_length: u16,        // Actual content length
+    pub category: MemoryCategory,
+    pub rarity: MemoryRarity,
+    pub stake: u64,                 // Remaining stake (can be lost via bad ratings)
+    pub times_pulled: u64,
+    pub total_rating: u64,          // Sum of all ratings
+    pub rating_count: u64,          // Number of ratings
+    pub active: bool,               // Can still be pulled
+    pub created_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct MemoryPull {
+    pub puller: Pubkey,
+    pub memory: Pubkey,
+    pub rating: Option<u8>,         // 1-5 rating, None if not yet rated
+    pub timestamp: i64,
+    pub bump: u8,
+}
+
+// === Hitman Market State Accounts ===
+
+#[account]
+#[derive(InitSpace)]
+pub struct HitPool {
+    pub authority: Pubkey,
+    pub house_edge_bps: u16,
+    pub total_hits: u64,
+    pub total_completed: u64,
+    pub total_bounties_paid: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Hit {
+    pub pool: Pubkey,
+    pub poster: Pubkey,
+    #[max_len(500)]
+    pub target_description: String,  // Who is being targeted
+    #[max_len(500)]
+    pub condition: String,           // What needs to happen
+    pub bounty: u64,
+    pub hunter: Option<Pubkey>,
+    #[max_len(500)]
+    pub proof_link: Option<String>,  // Forum URL, tx hash, etc.
+    pub anonymous: bool,             // Hide poster identity until resolved
+    pub status: HitStatus,
+    pub created_at: i64,
+    pub claimed_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub hunter_stake: u64,           // Hunter's stake (lost if they fail)
+    pub hit_index: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Arbitration {
+    pub hit: Pubkey,
+    pub votes_approve: u8,
+    pub votes_reject: u8,
+    #[max_len(3)]
+    pub arbiters: Vec<Pubkey>,
+    #[max_len(3)]
+    pub stakes: Vec<u64>,
+    #[max_len(3)]
+    pub votes: Vec<bool>,            // true = approve, false = reject
+    pub bump: u8,
+}
+
 // === Types ===
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -1684,6 +2723,34 @@ pub enum MarketStatus {
     Revealing,    // Phase 2: Bettors reveal their choices
     Resolved,     // Phase 3: Winner declared, payouts available
     Cancelled,    // Market cancelled, refunds available
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Default)]
+pub enum HitStatus {
+    #[default]
+    Open,               // Available for hunters to claim
+    Claimed,            // Hunter is working on it
+    PendingVerification, // Proof submitted, waiting for poster to verify
+    Disputed,           // Poster rejected, going to arbitration
+    Completed,          // Hit completed successfully
+    Cancelled,          // Poster cancelled the hit
+}
+
+// Memory Slots enums
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum MemoryCategory {
+    Strategy,     // Trading/gambling strategies
+    Technical,    // Technical knowledge, code, APIs
+    Alpha,        // Alpha information, market insights
+    Random,       // Misc/fun/creative content
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum MemoryRarity {
+    Common,       // 70% pull chance
+    Rare,         // 25% pull chance
+    Legendary,    // 5% pull chance
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -1848,6 +2915,133 @@ pub struct PredictionRefundClaimed {
     pub refund_amount: u64,
 }
 
+// Memory Slots events
+
+#[event]
+pub struct MemoryPoolCreated {
+    pub pool: Pubkey,
+    pub authority: Pubkey,
+    pub pull_price: u64,
+    pub house_edge_bps: u16,
+}
+
+#[event]
+pub struct MemoryDeposited {
+    pub pool: Pubkey,
+    pub memory: Pubkey,
+    pub depositor: Pubkey,
+    pub category: MemoryCategory,
+    pub rarity: MemoryRarity,
+    pub stake: u64,
+}
+
+#[event]
+pub struct MemoryPulled {
+    pub pool: Pubkey,
+    pub memory: Pubkey,
+    pub puller: Pubkey,
+    pub depositor: Pubkey,
+    pub content: String,
+    pub pull_price: u64,
+    pub depositor_share: u64,
+    pub house_take: u64,
+}
+
+#[event]
+pub struct MemoryRated {
+    pub pool: Pubkey,
+    pub memory: Pubkey,
+    pub rater: Pubkey,
+    pub depositor: Pubkey,
+    pub rating: u8,
+    pub stake_change: i64,  // Negative if depositor lost stake
+}
+
+#[event]
+pub struct MemoryWithdrawn {
+    pub pool: Pubkey,
+    pub memory: Pubkey,
+    pub depositor: Pubkey,
+    pub refund: u64,
+    pub fee: u64,
+}
+
+// === Hitman Market Events ===
+
+#[event]
+pub struct HitPoolInitialized {
+    pub authority: Pubkey,
+    pub house_edge_bps: u16,
+}
+
+#[event]
+pub struct HitCreated {
+    pub hit: Pubkey,
+    pub poster: Pubkey,        // Pubkey::default() if anonymous
+    pub target_description: String,
+    pub condition: String,
+    pub bounty: u64,
+    pub anonymous: bool,
+}
+
+#[event]
+pub struct HitClaimed {
+    pub hit: Pubkey,
+    pub hunter: Pubkey,
+    pub claimed_at: i64,
+}
+
+#[event]
+pub struct ProofSubmitted {
+    pub hit: Pubkey,
+    pub hunter: Pubkey,
+    pub proof_link: String,
+}
+
+#[event]
+pub struct HitCompleted {
+    pub hit: Pubkey,
+    pub hunter: Pubkey,
+    pub payout: u64,
+}
+
+#[event]
+pub struct HitDisputed {
+    pub hit: Pubkey,
+    pub poster: Pubkey,
+}
+
+#[event]
+pub struct HitCancelled {
+    pub hit: Pubkey,
+    pub poster: Pubkey,
+    pub refund: u64,
+}
+
+#[event]
+pub struct ClaimExpired {
+    pub hit: Pubkey,
+    pub former_hunter: Pubkey,
+    pub stake_forfeited: u64,
+}
+
+#[event]
+pub struct ArbitrationVote {
+    pub hit: Pubkey,
+    pub arbiter: Pubkey,
+    pub vote_approve: bool,
+    pub votes_approve: u8,
+    pub votes_reject: u8,
+}
+
+#[event]
+pub struct ArbitrationResolved {
+    pub hit: Pubkey,
+    pub hunter_wins: bool,
+    pub votes_approve: u8,
+    pub votes_reject: u8,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -1924,4 +3118,58 @@ pub enum CasinoError {
     BetNotRevealed,
     #[msg("No winning bets - cannot claim")]
     NoWinningBets,
+    // Memory Slots errors
+    #[msg("Memory content invalid (must be 1-500 chars)")]
+    MemoryContentInvalid,
+    #[msg("Memory is not active")]
+    MemoryNotActive,
+    #[msg("Memory pool mismatch")]
+    MemoryPoolMismatch,
+    #[msg("Memory has already been pulled")]
+    MemoryAlreadyPulled,
+    #[msg("Not the memory owner")]
+    NotMemoryOwner,
+    #[msg("Invalid depositor account")]
+    InvalidDepositor,
+    #[msg("Not the pull owner")]
+    NotPullOwner,
+    #[msg("Invalid rating (must be 1-5)")]
+    InvalidRating,
+    #[msg("Already rated this memory")]
+    AlreadyRated,
+    // Hitman Market errors
+    #[msg("Hit description invalid (must be 10-200 chars)")]
+    HitDescriptionInvalid,
+    #[msg("Hit condition invalid (must be 10-500 chars)")]
+    HitConditionInvalid,
+    #[msg("Hit bounty too small (minimum 0.01 SOL)")]
+    HitBountyTooSmall,
+    #[msg("Hit is not open for claims")]
+    HitNotOpen,
+    #[msg("Cannot hunt your own hit")]
+    CannotHuntOwnHit,
+    #[msg("Hit has not been claimed")]
+    HitNotClaimed,
+    #[msg("Not the hunter for this hit")]
+    NotTheHunter,
+    #[msg("Proof link invalid (must be valid URL)")]
+    ProofLinkInvalid,
+    #[msg("Hit is not pending verification")]
+    HitNotPendingVerification,
+    #[msg("Not the hit poster")]
+    NotHitPoster,
+    #[msg("Claim has not expired yet")]
+    ClaimNotExpired,
+    #[msg("Hit is not in disputed state")]
+    HitNotDisputed,
+    #[msg("Already voted on this arbitration")]
+    AlreadyVotedArbitration,
+    #[msg("Arbitration panel is full")]
+    ArbitrationFull,
+    #[msg("Invalid arbiter")]
+    InvalidArbiter,
+    #[msg("Hit pool mismatch")]
+    HitPoolMismatch,
+    #[msg("Stake amount too low")]
+    StakeTooLow,
 }

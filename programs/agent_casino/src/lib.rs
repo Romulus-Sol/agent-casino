@@ -2138,6 +2138,249 @@ pub mod agent_casino {
 
         Ok(())
     }
+
+    // === Pyth Price Prediction Instructions ===
+
+    /// Create a price prediction bet
+    pub fn create_price_prediction(
+        ctx: Context<CreatePricePrediction>,
+        asset: PriceAsset,
+        target_price: i64,
+        direction: PriceDirection,
+        duration_seconds: i64,
+        bet_amount: u64,
+    ) -> Result<()> {
+        let house = &ctx.accounts.house;
+        require!(bet_amount >= house.min_bet, CasinoError::BetTooSmall);
+        require!(duration_seconds >= 60 && duration_seconds <= 86400 * 7, CasinoError::InvalidDuration);
+        require!(target_price > 0, CasinoError::InvalidTargetPrice);
+
+        // Transfer bet to house escrow
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.creator.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, bet_amount)?;
+
+        let clock = Clock::get()?;
+
+        // Extract keys before mutable borrow
+        let prediction_key = ctx.accounts.price_prediction.key();
+        let creator_key = ctx.accounts.creator.key();
+        let house_key = ctx.accounts.house.key();
+        let bet_index = ctx.accounts.house.total_games;
+        let expiry_time = clock.unix_timestamp + duration_seconds;
+
+        // Initialize price prediction
+        let prediction = &mut ctx.accounts.price_prediction;
+        prediction.house = house_key;
+        prediction.creator = creator_key;
+        prediction.taker = Pubkey::default();
+        prediction.asset = asset;
+        prediction.target_price = target_price;
+        prediction.direction = direction;
+        prediction.bet_amount = bet_amount;
+        prediction.creation_time = clock.unix_timestamp;
+        prediction.expiry_time = expiry_time;
+        prediction.settled_price = 0;
+        prediction.winner = Pubkey::default();
+        prediction.status = PredictionStatus::Open;
+        prediction.bet_index = bet_index;
+        prediction.bump = ctx.bumps.price_prediction;
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.total_games += 1;
+        house.total_volume = house.total_volume.checked_add(bet_amount).unwrap();
+
+        emit!(PricePredictionCreated {
+            prediction: prediction_key,
+            creator: creator_key,
+            asset,
+            target_price,
+            direction,
+            bet_amount,
+            expiry_time,
+        });
+
+        Ok(())
+    }
+
+    /// Take the opposite side of a price prediction
+    pub fn take_price_prediction(ctx: Context<TakePricePrediction>) -> Result<()> {
+        let prediction = &ctx.accounts.price_prediction;
+        let clock = Clock::get()?;
+
+        // Check not expired
+        require!(clock.unix_timestamp < prediction.expiry_time, CasinoError::PriceBetExpired);
+        // Check not taking own bet
+        require!(ctx.accounts.taker.key() != prediction.creator, CasinoError::CannotTakeOwnBet);
+
+        // Extract values before mutable borrow
+        let prediction_key = ctx.accounts.price_prediction.key();
+        let taker_key = ctx.accounts.taker.key();
+        let bet_amount = prediction.bet_amount;
+        let total_pool = bet_amount * 2;
+
+        // Transfer matching bet to house escrow
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.taker.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, bet_amount)?;
+
+        // Update prediction
+        let prediction = &mut ctx.accounts.price_prediction;
+        prediction.taker = taker_key;
+        prediction.status = PredictionStatus::Matched;
+
+        // Update house volume
+        let house = &mut ctx.accounts.house;
+        house.total_volume = house.total_volume.checked_add(bet_amount).unwrap();
+
+        emit!(PricePredictionTaken {
+            prediction: prediction_key,
+            taker: taker_key,
+            total_pool,
+        });
+
+        Ok(())
+    }
+
+    /// Settle a price prediction using Pyth oracle
+    pub fn settle_price_prediction(ctx: Context<SettlePricePrediction>) -> Result<()> {
+        let prediction = &ctx.accounts.price_prediction;
+        let clock = Clock::get()?;
+
+        // Check expired (can only settle after expiry)
+        require!(clock.unix_timestamp >= prediction.expiry_time, CasinoError::PriceBetNotExpired);
+
+        // Verify creator and taker accounts match
+        require!(ctx.accounts.creator.key() == prediction.creator, CasinoError::InvalidCreatorAccount);
+        require!(ctx.accounts.taker.key() == prediction.taker, CasinoError::InvalidTakerAccount);
+
+        // Parse Pyth price feed manually
+        // Pyth price account structure: magic(4) + version(4) + type(4) + size(4) + price_type(4) +
+        // exponent(4) + num_component_prices(4) + num_quoters(4) + last_slot(8) + valid_slot(8) +
+        // twap(16) + twac(16) + drv1(8) + drv2(8) + product(32) + next(32) + prev_slot(8) +
+        // prev_price(8) + prev_conf(8) + drv3(8) + agg.price(8) + agg.conf(8) + ...
+        let price_data = ctx.accounts.price_feed.data.borrow();
+        require!(price_data.len() >= 208, CasinoError::InvalidPriceFeed);
+
+        // Check magic number (0xa1b2c3d4 for Pyth V2)
+        let magic = u32::from_le_bytes([price_data[0], price_data[1], price_data[2], price_data[3]]);
+        require!(magic == 0xa1b2c3d4, CasinoError::InvalidPriceFeed);
+
+        // Get aggregate price (offset 208 in price account)
+        // agg.price is at offset 208
+        let price_offset = 208;
+        let current_price = i64::from_le_bytes([
+            price_data[price_offset], price_data[price_offset+1], price_data[price_offset+2], price_data[price_offset+3],
+            price_data[price_offset+4], price_data[price_offset+5], price_data[price_offset+6], price_data[price_offset+7],
+        ]);
+
+        // Get publish time (for staleness check) - at offset 232
+        let time_offset = 232;
+        let publish_time = i64::from_le_bytes([
+            price_data[time_offset], price_data[time_offset+1], price_data[time_offset+2], price_data[time_offset+3],
+            price_data[time_offset+4], price_data[time_offset+5], price_data[time_offset+6], price_data[time_offset+7],
+        ]);
+
+        // Check staleness (5 minute threshold)
+        require!(clock.unix_timestamp - publish_time < 300, CasinoError::PriceFeedStale);
+
+        // Determine winner based on direction
+        let creator_wins = match prediction.direction {
+            PriceDirection::Above => current_price >= prediction.target_price,
+            PriceDirection::Below => current_price < prediction.target_price,
+        };
+
+        let winner = if creator_wins {
+            prediction.creator
+        } else {
+            prediction.taker
+        };
+
+        // Calculate payout (total pool minus house edge)
+        let total_pool = prediction.bet_amount * 2;
+        let house = &ctx.accounts.house;
+        let house_take = total_pool * house.house_edge_bps as u64 / 10000;
+        let payout = total_pool - house_take;
+
+        // Transfer payout to winner
+        let winner_account = if creator_wins {
+            ctx.accounts.creator.to_account_info()
+        } else {
+            ctx.accounts.taker.to_account_info()
+        };
+
+        // Extract values for emit before mutable borrow
+        let prediction_key = ctx.accounts.price_prediction.key();
+        let target_price = prediction.target_price;
+        let direction = prediction.direction;
+
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+        **winner_account.try_borrow_mut_lamports()? += payout;
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.total_payout = house.total_payout.checked_add(payout).unwrap();
+        house.pool = house.pool.checked_add(house_take).unwrap();
+
+        // Update prediction
+        let prediction = &mut ctx.accounts.price_prediction;
+        prediction.settled_price = current_price;
+        prediction.winner = winner;
+        prediction.status = PredictionStatus::Settled;
+
+        emit!(PricePredictionSettled {
+            prediction: prediction_key,
+            settled_price: current_price,
+            target_price,
+            direction,
+            winner,
+            payout,
+            house_take,
+        });
+
+        Ok(())
+    }
+
+    /// Cancel an unmatched price prediction
+    pub fn cancel_price_prediction(ctx: Context<CancelPricePrediction>) -> Result<()> {
+        let prediction = &ctx.accounts.price_prediction;
+        let clock = Clock::get()?;
+
+        // Can only cancel if expired and unmatched
+        require!(clock.unix_timestamp >= prediction.expiry_time, CasinoError::PriceBetNotExpired);
+
+        // Extract values for emit
+        let prediction_key = ctx.accounts.price_prediction.key();
+        let creator_key = ctx.accounts.creator.key();
+        let refund = prediction.bet_amount;
+
+        // Refund creator
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= refund;
+        **ctx.accounts.creator.to_account_info().try_borrow_mut_lamports()? += refund;
+
+        // Update prediction
+        let prediction = &mut ctx.accounts.price_prediction;
+        prediction.status = PredictionStatus::Cancelled;
+
+        emit!(PricePredictionCancelled {
+            prediction: prediction_key,
+            creator: creator_key,
+            refund,
+        });
+
+        Ok(())
+    }
 }
 
 // === Helper Functions ===
@@ -3086,6 +3329,88 @@ pub struct VrfCoinFlipSettle<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// === Pyth Price Prediction Contexts ===
+
+#[derive(Accounts)]
+pub struct CreatePricePrediction<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + PricePrediction::INIT_SPACE,
+        seeds = [b"price_bet", house.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub price_prediction: Account<'info, PricePrediction>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct TakePricePrediction<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = price_prediction.status == PredictionStatus::Open @ CasinoError::PriceBetNotOpen,
+        constraint = price_prediction.taker == Pubkey::default() @ CasinoError::PriceBetAlreadyTaken
+    )]
+    pub price_prediction: Account<'info, PricePrediction>,
+
+    #[account(mut)]
+    pub taker: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SettlePricePrediction<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = price_prediction.status == PredictionStatus::Matched @ CasinoError::PriceBetNotMatched
+    )]
+    pub price_prediction: Account<'info, PricePrediction>,
+
+    /// CHECK: Pyth price feed account
+    pub price_feed: UncheckedAccount<'info>,
+
+    /// CHECK: Creator to receive payout if winner
+    #[account(mut)]
+    pub creator: UncheckedAccount<'info>,
+
+    /// CHECK: Taker to receive payout if winner
+    #[account(mut)]
+    pub taker: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub settler: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelPricePrediction<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = price_prediction.status == PredictionStatus::Open @ CasinoError::PriceBetNotOpen,
+        constraint = price_prediction.creator == creator.key() @ CasinoError::NotPriceBetCreator
+    )]
+    pub price_prediction: Account<'info, PricePrediction>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 // === State Accounts ===
 
 #[account]
@@ -3361,6 +3686,50 @@ pub enum VrfStatus {
     Pending,    // Waiting for randomness
     Settled,    // Game completed
     Expired,    // Timeout - refund available
+}
+
+// === Pyth Price Prediction Support ===
+
+/// Price prediction bet - bet on real-world price movements
+#[account]
+#[derive(InitSpace)]
+pub struct PricePrediction {
+    pub house: Pubkey,
+    pub creator: Pubkey,
+    pub taker: Pubkey,           // Pubkey::default() if no taker yet
+    pub asset: PriceAsset,
+    pub target_price: i64,       // Price with Pyth decimals (8 decimals for USD)
+    pub direction: PriceDirection,
+    pub bet_amount: u64,
+    pub creation_time: i64,
+    pub expiry_time: i64,
+    pub settled_price: i64,      // 0 if not settled
+    pub winner: Pubkey,          // Pubkey::default() if not settled
+    pub status: PredictionStatus,
+    pub bet_index: u64,
+    pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum PriceAsset {
+    BTC,
+    SOL,
+    ETH,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum PriceDirection {
+    Above,
+    Below,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Default)]
+pub enum PredictionStatus {
+    #[default]
+    Open,       // Waiting for taker
+    Matched,    // Both sides filled
+    Settled,    // Oracle settled
+    Cancelled,  // Creator cancelled (unmatched)
 }
 
 // === Types ===
@@ -3763,6 +4132,44 @@ pub struct VrfRequestSettled {
     pub won: bool,
 }
 
+// === Pyth Price Prediction Events ===
+
+#[event]
+pub struct PricePredictionCreated {
+    pub prediction: Pubkey,
+    pub creator: Pubkey,
+    pub asset: PriceAsset,
+    pub target_price: i64,
+    pub direction: PriceDirection,
+    pub bet_amount: u64,
+    pub expiry_time: i64,
+}
+
+#[event]
+pub struct PricePredictionTaken {
+    pub prediction: Pubkey,
+    pub taker: Pubkey,
+    pub total_pool: u64,
+}
+
+#[event]
+pub struct PricePredictionSettled {
+    pub prediction: Pubkey,
+    pub settled_price: i64,
+    pub target_price: i64,
+    pub direction: PriceDirection,
+    pub winner: Pubkey,
+    pub payout: u64,
+    pub house_take: u64,
+}
+
+#[event]
+pub struct PricePredictionCancelled {
+    pub prediction: Pubkey,
+    pub creator: Pubkey,
+    pub refund: u64,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -3909,4 +4316,31 @@ pub enum CasinoError {
     VrfRandomnessNotReady,
     #[msg("Invalid VRF randomness account")]
     VrfInvalidRandomness,
+    // Price prediction errors
+    #[msg("Price bet is not open")]
+    PriceBetNotOpen,
+    #[msg("Price bet already taken")]
+    PriceBetAlreadyTaken,
+    #[msg("Price bet not matched")]
+    PriceBetNotMatched,
+    #[msg("Price bet not yet expired")]
+    PriceBetNotExpired,
+    #[msg("Price bet has expired")]
+    PriceBetExpired,
+    #[msg("Not the price bet creator")]
+    NotPriceBetCreator,
+    #[msg("Cannot take your own bet")]
+    CannotTakeOwnBet,
+    #[msg("Invalid duration (must be 1 min to 7 days)")]
+    InvalidDuration,
+    #[msg("Invalid target price")]
+    InvalidTargetPrice,
+    #[msg("Invalid price feed account")]
+    InvalidPriceFeed,
+    #[msg("Price feed is stale")]
+    PriceFeedStale,
+    #[msg("Invalid creator account")]
+    InvalidCreatorAccount,
+    #[msg("Invalid taker account")]
+    InvalidTakerAccount,
 }

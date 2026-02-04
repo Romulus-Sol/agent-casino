@@ -253,3 +253,13 @@ pub fn derive_vrf_request_pda(player: &Pubkey, game_index: u64, program_id: &Pub
         program_id,
     )
 }
+
+// === Pyth Price Prediction PDA Derivations ===
+
+/// Derive the price prediction PDA address
+pub fn derive_price_prediction_pda(house: &Pubkey, bet_index: u64, program_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[b"price_bet", house.as_ref(), &bet_index.to_le_bytes()],
+        program_id,
+    )
+}

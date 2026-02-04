@@ -3,6 +3,10 @@ use anchor_lang::system_program;
 
 declare_id!("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
+/// CPI helpers for cross-program invocation
+pub mod cpi_helpers;
+pub use cpi_helpers::*;
+
 /// Agent Casino Protocol
 /// A headless, API-first casino designed for AI agents.
 /// All games are provably fair with on-chain verification.
@@ -1454,24 +1458,22 @@ pub mod agent_casino {
         ctx: Context<CreateHit>,
         target_description: String,
         condition: String,
+        bounty_amount: u64,
         anonymous: bool,
     ) -> Result<()> {
-        require!(target_description.len() >= 1 && target_description.len() <= 500, CasinoError::HitDescriptionInvalid);
-        require!(condition.len() >= 1 && condition.len() <= 500, CasinoError::HitConditionInvalid);
+        require!(target_description.len() >= 10 && target_description.len() <= 200, CasinoError::HitDescriptionInvalid);
+        require!(condition.len() >= 10 && condition.len() <= 500, CasinoError::HitConditionInvalid);
+        require!(bounty_amount >= 10_000_000, CasinoError::HitBountyTooSmall); // Min 0.01 SOL
 
-        let bounty = ctx.accounts.poster.lamports();
-        let transfer_amount = ctx.accounts.bounty_amount;
-        require!(transfer_amount >= 5_000_000, CasinoError::HitBountyTooSmall); // Min 0.005 SOL
-
-        // Transfer bounty to hit escrow
+        // Transfer bounty to hit vault
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.poster.to_account_info(),
-                to: ctx.accounts.hit.to_account_info(),
+                to: ctx.accounts.hit_vault.to_account_info(),
             },
         );
-        system_program::transfer(cpi_context, transfer_amount)?;
+        system_program::transfer(cpi_context, bounty_amount)?;
 
         let clock = Clock::get()?;
         let pool = &mut ctx.accounts.hit_pool;
@@ -1483,7 +1485,7 @@ pub mod agent_casino {
         hit.poster = ctx.accounts.poster.key();
         hit.target_description = target_description.clone();
         hit.condition = condition.clone();
-        hit.bounty = transfer_amount;
+        hit.bounty = bounty_amount;
         hit.hunter = None;
         hit.proof_link = None;
         hit.anonymous = anonymous;
@@ -1491,6 +1493,7 @@ pub mod agent_casino {
         hit.created_at = clock.unix_timestamp;
         hit.claimed_at = None;
         hit.completed_at = None;
+        hit.hunter_stake = 0;
         hit.hit_index = hit_index;
         hit.bump = ctx.bumps.hit;
 
@@ -1499,7 +1502,7 @@ pub mod agent_casino {
             poster: if anonymous { Pubkey::default() } else { ctx.accounts.poster.key() },
             target_description,
             condition,
-            bounty: transfer_amount,
+            bounty: bounty_amount,
             anonymous,
         });
 
@@ -1507,18 +1510,21 @@ pub mod agent_casino {
     }
 
     /// Claim a hit (hunter announces they're going for it)
-    pub fn claim_hit(ctx: Context<ClaimHit>) -> Result<()> {
+    pub fn claim_hit(ctx: Context<ClaimHit>, stake_amount: u64) -> Result<()> {
         let hit = &ctx.accounts.hit;
         require!(hit.status == HitStatus::Open, CasinoError::HitNotOpen);
         require!(hit.poster != ctx.accounts.hunter.key(), CasinoError::CannotHuntOwnHit);
 
-        // Optional stake to prevent spam (0.005 SOL)
-        let stake_amount = 5_000_000u64;
+        // Minimum stake is 10% of bounty or 0.005 SOL, whichever is higher
+        let min_stake = std::cmp::max(hit.bounty / 10, 5_000_000u64);
+        require!(stake_amount >= min_stake, CasinoError::StakeTooLow);
+
+        // Transfer stake to hit vault
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
                 from: ctx.accounts.hunter.to_account_info(),
-                to: ctx.accounts.hit.to_account_info(),
+                to: ctx.accounts.hit_vault.to_account_info(),
             },
         );
         system_program::transfer(cpi_context, stake_amount)?;
@@ -1572,7 +1578,8 @@ pub mod agent_casino {
             let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
             let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
 
-            **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= payout;
+            // Transfer from vault to hunter
+            **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
 
             let clock = Clock::get()?;
@@ -1613,7 +1620,8 @@ pub mod agent_casino {
         let cancel_fee = hit.bounty / 100;
         let refund = hit.bounty.saturating_sub(cancel_fee);
 
-        **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= refund;
+        // Transfer from vault to poster
+        **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= refund;
         **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += refund;
 
         let hit = &mut ctx.accounts.hit;
@@ -1638,20 +1646,26 @@ pub mod agent_casino {
         let elapsed = clock.unix_timestamp - claimed_at;
         require!(elapsed >= 86400, CasinoError::ClaimNotExpired); // 24 hours
 
-        // Hunter loses stake, hit goes back to open
+        // Hunter loses stake to poster as compensation for wasted time
+        let stake = hit.hunter_stake;
+        let former_hunter = hit.hunter.unwrap_or_default();
+
+        // Transfer forfeited stake to poster
+        **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= stake;
+        **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += stake;
+
+        // Hit goes back to open
         let hit = &mut ctx.accounts.hit;
         hit.hunter = None;
         hit.status = HitStatus::Open;
         hit.claimed_at = None;
-        // Hunter stake stays in hit escrow as bonus for next hunter
+        hit.hunter_stake = 0;
 
         emit!(ClaimExpired {
             hit: ctx.accounts.hit.key(),
-            former_hunter: hit.hunter.unwrap_or_default(),
-            stake_forfeited: hit.hunter_stake,
+            former_hunter,
+            stake_forfeited: stake,
         });
-
-        hit.hunter_stake = 0;
 
         Ok(())
     }
@@ -1661,13 +1675,14 @@ pub mod agent_casino {
         let hit = &ctx.accounts.hit;
         require!(hit.status == HitStatus::Disputed, CasinoError::HitNotDisputed);
 
-        let arbitration = &mut ctx.accounts.arbitration;
+        // Check arbiter hasn't already voted (immutable borrow for checks)
+        {
+            let arbitration = &ctx.accounts.arbitration;
+            require!(!arbitration.arbiters.contains(&ctx.accounts.arbiter.key()), CasinoError::AlreadyVotedArbitration);
+            require!(arbitration.arbiters.len() < 3, CasinoError::ArbitrationFull);
+        }
 
-        // Check arbiter hasn't already voted
-        require!(!arbitration.arbiters.contains(&ctx.accounts.arbiter.key()), CasinoError::AlreadyVoted);
-        require!(arbitration.arbiters.len() < 3, CasinoError::ArbitrationFull);
-
-        // Arbiter stakes 0.01 SOL
+        // Arbiter stakes 0.01 SOL (transfer before mutable borrow)
         let stake_amount = 10_000_000u64;
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -1678,6 +1693,8 @@ pub mod agent_casino {
         );
         system_program::transfer(cpi_context, stake_amount)?;
 
+        // Now do mutable updates
+        let arbitration = &mut ctx.accounts.arbitration;
         arbitration.arbiters.push(ctx.accounts.arbiter.key());
         arbitration.stakes.push(stake_amount);
         if vote_approve {
@@ -1700,17 +1717,18 @@ pub mod agent_casino {
             let hunter_wins = arbitration.votes_approve >= 2;
 
             if hunter_wins {
-                // Pay hunter
+                // Pay hunter: bounty + stake back minus house fee
                 let pool = &ctx.accounts.hit_pool;
                 let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
                 let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
 
-                **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= payout;
+                **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
                 **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
             } else {
-                // Return bounty to poster
-                **ctx.accounts.hit.to_account_info().try_borrow_mut_lamports()? -= hit.bounty;
-                **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += hit.bounty;
+                // Return bounty + hunter stake to poster
+                let refund = hit.bounty + hit.hunter_stake;
+                **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= refund;
+                **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += refund;
             }
 
             // Pay winning arbiters, losing arbiters lose stake
@@ -2308,6 +2326,14 @@ pub struct InitializeHitPool<'info> {
     )]
     pub hit_pool: Account<'info, HitPool>,
 
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault for holding bounties and stakes
+    pub hit_vault: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -2467,15 +2493,25 @@ pub struct ExpireClaim<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(vote_for_hunter: bool)]
 pub struct ArbitrateHit<'info> {
     #[account(mut, seeds = [b"hit_pool"], bump = hit_pool.bump)]
     pub hit_pool: Account<'info, HitPool>,
 
     #[account(
         mut,
-        constraint = hit.status == HitStatus::Disputed @ CasinoError::HitNotDisputed
+        constraint = hit.status == HitStatus::Disputed @ CasinoError::HitNotDisputed,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch
     )]
     pub hit: Account<'info, Hit>,
+
+    #[account(
+        mut,
+        seeds = [b"hit_vault", hit_pool.key().as_ref()],
+        bump
+    )]
+    /// CHECK: PDA vault holding bounty and stake
+    pub hit_vault: UncheckedAccount<'info>,
 
     #[account(
         init_if_needed,

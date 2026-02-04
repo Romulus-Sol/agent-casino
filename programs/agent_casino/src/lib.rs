@@ -641,24 +641,24 @@ pub mod agent_casino {
     // Phase 3 (Resolve): Authority declares winning outcome
     // Phase 4 (Claim): Winners claim proportional winnings
 
-    /// Create a new prediction market with commit-reveal betting
+    /// Create a new OPEN prediction market with commit-reveal betting
+    ///
+    /// OPEN MARKET DESIGN:
+    /// - No fixed outcome list - agents can bet on ANY project
+    /// - Bettors specify project slug when revealing (e.g., "clodds", "agent-casino-protocol")
+    /// - All correct predictions split the pool proportionally
+    ///
     /// question: Short description (e.g., "Which project wins 1st place?")
-    /// outcomes: Array of outcome names (e.g., ["agent-casino", "clawverse", "sipher"])
     /// commit_deadline: Unix timestamp when commit phase ends
-    /// reveal_deadline: Unix timestamp when reveal phase ends (must be after commit_deadline)
+    /// reveal_deadline: Unix timestamp when reveal phase ends
     pub fn create_prediction_market(
         ctx: Context<CreatePredictionMarket>,
         market_id: u64,
         question: String,
-        outcomes: Vec<String>,
         commit_deadline: i64,
         reveal_deadline: i64,
     ) -> Result<()> {
-        require!(outcomes.len() >= 2 && outcomes.len() <= 10, CasinoError::InvalidOutcomeCount);
         require!(question.len() <= 200, CasinoError::QuestionTooLong);
-        for outcome in &outcomes {
-            require!(outcome.len() <= 32, CasinoError::OutcomeNameTooLong);
-        }
 
         let clock = Clock::get()?;
         require!(commit_deadline > clock.unix_timestamp, CasinoError::InvalidCloseTime);
@@ -667,10 +667,16 @@ pub mod agent_casino {
         let market = &mut ctx.accounts.market;
         market.authority = ctx.accounts.authority.key();
         market.market_id = market_id;
-        market.question = question.clone();
-        market.outcome_count = outcomes.len() as u8;
+
+        // Store question as fixed-size array
+        let mut question_bytes = [0u8; 200];
+        let q_bytes = question.as_bytes();
+        question_bytes[..q_bytes.len().min(200)].copy_from_slice(&q_bytes[..q_bytes.len().min(200)]);
+        market.question = question_bytes;
+
         market.status = MarketStatus::Committing;
-        market.winning_outcome = 0;
+        market.winning_project = [0u8; 50]; // Empty until resolved
+        market.winning_pool = 0;
         market.total_pool = 0;
         market.total_committed = 0;
         market.commit_deadline = commit_deadline;
@@ -679,22 +685,10 @@ pub mod agent_casino {
         market.created_at = clock.unix_timestamp;
         market.bump = ctx.bumps.market;
 
-        // Initialize outcome pools (up to 10 outcomes)
-        market.outcome_pools = [0u64; 10];
-
-        // Store outcome names
-        let mut outcome_names = [[0u8; 32]; 10];
-        for (i, name) in outcomes.iter().enumerate() {
-            let bytes = name.as_bytes();
-            outcome_names[i][..bytes.len()].copy_from_slice(bytes);
-        }
-        market.outcome_names = outcome_names;
-
         emit!(PredictionMarketCreated {
             market_id: ctx.accounts.market.key(),
             authority: ctx.accounts.authority.key(),
             question,
-            outcome_count: outcomes.len() as u8,
             commit_deadline,
             reveal_deadline,
         });
@@ -742,6 +736,7 @@ pub mod agent_casino {
         market.total_committed = market.total_committed.checked_add(amount).unwrap();
 
         // Store commitment with timestamp for early bird bonus
+        // Commitment = hash(project_slug || salt) - verified at reveal time
         let bet = &mut ctx.accounts.bet;
         require!(bet.bettor == Pubkey::default(), CasinoError::AlreadyCommitted);
         bet.bettor = bettor_key;
@@ -750,7 +745,7 @@ pub mod agent_casino {
         bet.amount = amount;
         bet.committed_at = clock.unix_timestamp; // For early bird fee rebate
         bet.revealed = false;
-        bet.outcome_index = 0; // Unknown until reveal
+        bet.predicted_project = [0u8; 50]; // Unknown until reveal
         bet.claimed = false;
         bet.bump = ctx.bumps.bet;
 
@@ -797,14 +792,21 @@ pub mod agent_casino {
     ///
     /// Verifies: hash(outcome_index || salt) == stored commitment
     /// Updates outcome pools with revealed bets
+    /// Reveal prediction bet with project slug
+    ///
+    /// OPEN MARKET: Bettors specify which project they're betting on.
+    /// Any valid project slug is accepted - no fixed outcome list.
+    ///
+    /// predicted_project: Project slug (e.g., "clodds", "agent-casino-protocol")
+    /// salt: 32-byte salt used in commitment
     pub fn reveal_prediction_bet(
         ctx: Context<RevealPredictionBet>,
-        outcome_index: u8,
+        predicted_project: String,
         salt: [u8; 32],
     ) -> Result<()> {
         let market = &ctx.accounts.market;
         require!(market.status == MarketStatus::Revealing, CasinoError::NotInRevealPhase);
-        require!(outcome_index < market.outcome_count, CasinoError::InvalidOutcome);
+        require!(predicted_project.len() > 0 && predicted_project.len() <= 50, CasinoError::InvalidProjectSlug);
 
         let clock = Clock::get()?;
         require!(clock.unix_timestamp < market.reveal_deadline, CasinoError::RevealPhaseClosed);
@@ -812,10 +814,12 @@ pub mod agent_casino {
         let bet = &ctx.accounts.bet;
         require!(!bet.revealed, CasinoError::AlreadyRevealed);
 
-        // Verify commitment: hash(outcome_index || salt) must equal stored commitment
-        let mut preimage = [0u8; 33];
-        preimage[0] = outcome_index;
-        preimage[1..33].copy_from_slice(&salt);
+        // Verify commitment: hash(project_slug || salt) must equal stored commitment
+        // Build preimage: project bytes (variable) + salt (32 bytes)
+        let project_bytes = predicted_project.as_bytes();
+        let mut preimage = Vec::with_capacity(project_bytes.len() + 32);
+        preimage.extend_from_slice(project_bytes);
+        preimage.extend_from_slice(&salt);
         let computed_hash = mix_bytes(&preimage);
         require!(computed_hash == bet.commitment, CasinoError::InvalidReveal);
 
@@ -823,23 +827,20 @@ pub mod agent_casino {
         let market_key = ctx.accounts.market.key();
         let bettor_key = ctx.accounts.bettor.key();
 
-        // Update outcome pool with revealed bet
-        let market = &mut ctx.accounts.market;
-        market.outcome_pools[outcome_index as usize] = market.outcome_pools[outcome_index as usize]
-            .checked_add(amount)
-            .unwrap();
+        // Mark bet as revealed with predicted project
+        let mut project_bytes = [0u8; 50];
+        let p_bytes = predicted_project.as_bytes();
+        project_bytes[..p_bytes.len().min(50)].copy_from_slice(&p_bytes[..p_bytes.len().min(50)]);
 
-        // Mark bet as revealed
         let bet = &mut ctx.accounts.bet;
         bet.revealed = true;
-        bet.outcome_index = outcome_index;
+        bet.predicted_project = project_bytes;
 
         emit!(PredictionBetRevealed {
             market_id: market_key,
             bettor: bettor_key,
-            outcome_index,
+            predicted_project,
             amount,
-            outcome_pool: market.outcome_pools[outcome_index as usize],
         });
 
         Ok(())
@@ -883,18 +884,26 @@ pub mod agent_casino {
         Ok(())
     }
 
-    /// Resolve a prediction market (authority only)
-    /// Can only be called after reveal phase ends
+    /// Resolve an OPEN prediction market (authority only)
+    ///
+    /// OPEN MARKET RESOLUTION:
+    /// - Authority provides winning project slug and total winning pool
+    /// - winning_pool = sum of all revealed bets on the winning project
+    /// - This is verifiable off-chain by summing revealed bets
+    ///
+    /// winning_project: Slug of winning project (e.g., "clodds")
+    /// winning_pool: Total SOL bet on the winning project (calculated off-chain)
     pub fn resolve_prediction_market(
         ctx: Context<ResolvePredictionMarket>,
-        winning_outcome: u8,
+        winning_project: String,
+        winning_pool: u64,
     ) -> Result<()> {
         let market = &ctx.accounts.market;
         require!(
             market.status == MarketStatus::Revealing || market.status == MarketStatus::Committing,
             CasinoError::MarketNotOpen
         );
-        require!(winning_outcome < market.outcome_count, CasinoError::InvalidOutcome);
+        require!(winning_project.len() > 0 && winning_project.len() <= 50, CasinoError::InvalidProjectSlug);
         require!(
             ctx.accounts.authority.key() == market.authority,
             CasinoError::NotMarketAuthority
@@ -906,7 +915,6 @@ pub mod agent_casino {
         // Capture values before mutable borrow
         let market_key = ctx.accounts.market.key();
         let total_pool = market.total_pool;
-        let winning_pool = market.outcome_pools[winning_outcome as usize];
 
         // NOTE: House fee is NOT taken here anymore - it's calculated per-bettor at claim time
         // with early bird discounts. Early bettors get up to 100% fee rebate.
@@ -920,15 +928,20 @@ pub mod agent_casino {
         let house_edge = house.house_edge_bps;
         let max_house_take = total_pool * house_edge as u64 / 10000;
 
-        // Update market state
+        // Update market state with winning project
+        let mut winner_bytes = [0u8; 50];
+        let w_bytes = winning_project.as_bytes();
+        winner_bytes[..w_bytes.len().min(50)].copy_from_slice(&w_bytes[..w_bytes.len().min(50)]);
+
         let market = &mut ctx.accounts.market;
         market.status = MarketStatus::Resolved;
-        market.winning_outcome = winning_outcome;
+        market.winning_project = winner_bytes;
+        market.winning_pool = winning_pool;
         market.resolved_at = clock.unix_timestamp;
 
         emit!(PredictionMarketResolved {
             market_id: market_key,
-            winning_outcome,
+            winning_project,
             total_pool,
             winning_pool,
             house_take: max_house_take, // Max possible; actual varies by early bird discounts
@@ -964,10 +977,13 @@ pub mod agent_casino {
         require!(market.status == MarketStatus::Resolved, CasinoError::MarketNotResolved);
         require!(bet.revealed, CasinoError::BetNotRevealed);
         require!(!bet.claimed, CasinoError::AlreadyClaimed);
-        require!(bet.outcome_index == market.winning_outcome, CasinoError::DidNotWin);
+
+        // OPEN MARKET: Compare project slugs (fixed-size arrays)
+        require!(bet.predicted_project == market.winning_project, CasinoError::DidNotWin);
 
         // Calculate base winnings using pari-mutuel formula (before fee)
-        let winning_pool = market.outcome_pools[market.winning_outcome as usize];
+        // winning_pool is provided at resolution time (sum of all bets on winning project)
+        let winning_pool = market.winning_pool;
         require!(winning_pool > 0, CasinoError::NoWinningBets);
 
         let gross_winnings = (bet.amount as u128)
@@ -1342,7 +1358,7 @@ pub struct CancelChallenge<'info> {
 // === Prediction Market Account Structures ===
 
 #[derive(Accounts)]
-#[instruction(market_id: u64, question: String, outcomes: Vec<String>, commit_deadline: i64, reveal_deadline: i64)]
+#[instruction(market_id: u64, question: String, commit_deadline: i64, reveal_deadline: i64)]
 pub struct CreatePredictionMarket<'info> {
     #[account(seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
@@ -1400,7 +1416,7 @@ pub struct StartRevealPhase<'info> {
 
 // REVEAL PHASE: Reveal your committed bet
 #[derive(Accounts)]
-#[instruction(outcome_index: u8, salt: [u8; 32])]
+#[instruction(predicted_project: String, salt: [u8; 32])]
 pub struct RevealPredictionBet<'info> {
     #[account(
         mut,
@@ -1595,15 +1611,12 @@ pub struct Challenge {
 pub struct PredictionMarket {
     pub authority: Pubkey,
     pub market_id: u64,
-    #[max_len(200)]
-    pub question: String,
-    pub outcome_count: u8,
-    pub outcome_names: [[u8; 32]; 10],  // Up to 10 outcomes, 32 bytes each
-    pub outcome_pools: [u64; 10],        // Pool for each outcome (populated after reveals)
+    pub question: [u8; 200],             // Question text (fixed size, null-padded)
     pub total_pool: u64,                 // Final pool after reveal phase
     pub total_committed: u64,            // Amount committed (before reveals)
+    pub winning_pool: u64,               // Total bet on winning project (set at resolution)
     pub status: MarketStatus,
-    pub winning_outcome: u8,
+    pub winning_project: [u8; 50],       // Winning project slug (fixed size, null-padded)
     pub commit_deadline: i64,            // When commit phase ends
     pub reveal_deadline: i64,            // When reveal phase ends
     pub resolved_at: i64,
@@ -1616,8 +1629,8 @@ pub struct PredictionMarket {
 pub struct PredictionBet {
     pub bettor: Pubkey,
     pub market: Pubkey,
-    pub commitment: [u8; 32],            // hash(outcome_index || salt) - hidden until reveal
-    pub outcome_index: u8,               // Actual choice (0 until revealed)
+    pub commitment: [u8; 32],            // hash(project_slug || salt) - hidden until reveal
+    pub predicted_project: [u8; 50],     // Project slug (null-padded, zeroed until revealed)
     pub amount: u64,
     pub committed_at: i64,               // Timestamp for early bird bonus calculation
     pub revealed: bool,                  // True after reveal phase
@@ -1740,7 +1753,6 @@ pub struct PredictionMarketCreated {
     pub market_id: Pubkey,
     pub authority: Pubkey,
     pub question: String,
-    pub outcome_count: u8,
     pub commit_deadline: i64,
     pub reveal_deadline: i64,
 }
@@ -1764,9 +1776,8 @@ pub struct RevealPhaseStarted {
 pub struct PredictionBetRevealed {
     pub market_id: Pubkey,
     pub bettor: Pubkey,
-    pub outcome_index: u8,
+    pub predicted_project: String,
     pub amount: u64,
-    pub outcome_pool: u64,
 }
 
 #[event]
@@ -1779,7 +1790,7 @@ pub struct BetForfeited {
 #[event]
 pub struct PredictionMarketResolved {
     pub market_id: Pubkey,
-    pub winning_outcome: u8,
+    pub winning_project: String,
     pub total_pool: u64,
     pub winning_pool: u64,
     pub house_take: u64,
@@ -1834,18 +1845,14 @@ pub enum CasinoError {
     #[msg("Invalid challenger account")]
     InvalidChallenger,
     // Prediction market errors
-    #[msg("Must have 2-10 outcomes")]
-    InvalidOutcomeCount,
     #[msg("Question too long (max 200 chars)")]
     QuestionTooLong,
-    #[msg("Outcome name too long (max 32 chars)")]
-    OutcomeNameTooLong,
     #[msg("Close time must be in the future")]
     InvalidCloseTime,
     #[msg("Market is not open")]
     MarketNotOpen,
-    #[msg("Invalid outcome index")]
-    InvalidOutcome,
+    #[msg("Invalid project slug (1-50 chars)")]
+    InvalidProjectSlug,
     #[msg("Betting has closed")]
     BettingClosed,
     #[msg("Only market authority can resolve")]

@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 /**
  * Take the opposite side of a price prediction
  * Usage: npx ts-node scripts/price-take.ts <prediction_address>
@@ -27,10 +28,8 @@ async function main() {
   );
 
   // Load wallet
-  const walletPath = `${os.homedir()}/.config/solana/id.json`;
-  const walletKeypair = anchor.web3.Keypair.fromSecretKey(
-    new Uint8Array(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load wallet (AgentWallet aware)
+  const { keypair: walletKeypair } = loadWallet();
   const wallet = new anchor.Wallet(walletKeypair);
 
   const provider = new anchor.AnchorProvider(connection, wallet, {

@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { Program, AnchorProvider, BN, web3 } from "@coral-xyz/anchor";
 import { AgentCasino } from "../target/types/agent_casino";
@@ -7,9 +8,8 @@ import * as path from "path";
 
 async function main() {
   // Load wallet
-  const keyPath = path.join(process.env.HOME || "", ".config/solana/id.json");
-  const rawKey = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
-  const wallet = Keypair.fromSecretKey(Uint8Array.from(rawKey));
+  // Load wallet (AgentWallet aware)
+  const { keypair: wallet } = loadWallet();
 
   console.log("Wallet:", wallet.publicKey.toBase58());
 

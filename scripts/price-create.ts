@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 /**
  * Create a price prediction bet
  * Usage: npx ts-node scripts/price-create.ts <asset> <target_price> <above|below> <duration_mins> <amount>
@@ -64,10 +65,8 @@ async function main() {
   );
 
   // Load wallet
-  const walletPath = `${os.homedir()}/.config/solana/id.json`;
-  const walletKeypair = anchor.web3.Keypair.fromSecretKey(
-    new Uint8Array(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load wallet (AgentWallet aware)
+  const { keypair: walletKeypair } = loadWallet();
   const wallet = new anchor.Wallet(walletKeypair);
 
   // Create provider

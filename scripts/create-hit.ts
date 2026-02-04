@@ -4,6 +4,7 @@ import { AgentCasino } from "../target/types/agent_casino";
 import { Connection, Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import * as fs from "fs";
 import * as path from "path";
+import { loadWallet } from "./utils/wallet";
 
 async function main() {
   // Parse args
@@ -34,10 +35,9 @@ async function main() {
     process.exit(1);
   }
 
-  // Load wallet
-  const keyPath = path.join(process.env.HOME || "", ".config/solana/id.json");
-  const rawKey = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
-  const wallet = Keypair.fromSecretKey(Uint8Array.from(rawKey));
+  // Load wallet (AgentWallet aware)
+  const walletConfig = loadWallet();
+  const wallet = walletConfig.keypair;
 
   console.log("Wallet:", wallet.publicKey.toBase58());
 

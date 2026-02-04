@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import * as fs from "fs";
@@ -12,10 +13,8 @@ async function main() {
   console.log("=== MEMORY POOL STATS ===\n");
 
   // Load wallet (for provider, not signing)
-  const walletPath = process.env.WALLET_PATH || `${process.env.HOME}/.config/solana/id.json`;
-  const walletKeypair = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load wallet (AgentWallet aware)
+  const { keypair: walletKeypair } = loadWallet();
 
   // Connect to devnet
   const connection = new Connection("https://api.devnet.solana.com", "confirmed");

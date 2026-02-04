@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { AgentCasino } from "../target/types/agent_casino";
@@ -11,9 +12,8 @@ async function main() {
   const statusFilter = args[0] || "all"; // "open", "claimed", "completed", "all"
 
   // Load wallet
-  const keyPath = path.join(process.env.HOME || "", ".config/solana/id.json");
-  const rawKey = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
-  const wallet = Keypair.fromSecretKey(Uint8Array.from(rawKey));
+  // Load wallet (AgentWallet aware)
+  const { keypair: wallet } = loadWallet();
 
   // Connect to devnet
   const connection = new Connection("https://api.devnet.solana.com", "confirmed");

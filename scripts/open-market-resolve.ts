@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import * as fs from "fs";
@@ -29,10 +30,8 @@ async function main() {
   const winningPool = new anchor.BN(winningPoolSol * LAMPORTS_PER_SOL);
 
   // Load wallet (must be market authority)
-  const walletPath = process.env.WALLET_PATH || `${process.env.HOME}/.config/solana/id.json`;
-  const walletKeypair = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load wallet (AgentWallet aware)
+  const { keypair: walletKeypair } = loadWallet();
   console.log("Authority:", walletKeypair.publicKey.toString());
 
   // Connect to devnet

@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import * as fs from "fs";
@@ -7,11 +8,8 @@ import * as crypto from "crypto";
 const PROGRAM_ID = new PublicKey("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
 async function main() {
-  // Load main wallet (funder)
-  const walletPath = process.env.WALLET_PATH || `${process.env.HOME}/.config/solana/id.json`;
-  const funderKeypair = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load main wallet (funder) - AgentWallet aware
+  const { keypair: funderKeypair } = loadWallet();
 
   // Create TWO fresh keypairs for clean test (no existing stats accounts)
   const challengerKeypair = Keypair.generate();

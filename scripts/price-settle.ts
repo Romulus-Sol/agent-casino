@@ -1,3 +1,4 @@
+import { loadWallet, isAgentWalletConfigured } from "./utils/wallet";
 /**
  * Settle a price prediction using Pyth oracle
  * Usage: npx ts-node scripts/price-settle.ts <prediction_address>
@@ -34,10 +35,8 @@ async function main() {
   );
 
   // Load wallet
-  const walletPath = `${os.homedir()}/.config/solana/id.json`;
-  const walletKeypair = anchor.web3.Keypair.fromSecretKey(
-    new Uint8Array(JSON.parse(fs.readFileSync(walletPath, "utf-8")))
-  );
+  // Load wallet (AgentWallet aware)
+  const { keypair: walletKeypair } = loadWallet();
   const wallet = new anchor.Wallet(walletKeypair);
 
   const provider = new anchor.AnchorProvider(connection, wallet, {

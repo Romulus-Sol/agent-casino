@@ -741,13 +741,14 @@ pub mod agent_casino {
         let market = &mut ctx.accounts.market;
         market.total_committed = market.total_committed.checked_add(amount).unwrap();
 
-        // Store commitment
+        // Store commitment with timestamp for early bird bonus
         let bet = &mut ctx.accounts.bet;
         require!(bet.bettor == Pubkey::default(), CasinoError::AlreadyCommitted);
         bet.bettor = bettor_key;
         bet.market = market_key;
         bet.commitment = commitment;
         bet.amount = amount;
+        bet.committed_at = clock.unix_timestamp; // For early bird fee rebate
         bet.revealed = false;
         bet.outcome_index = 0; // Unknown until reveal
         bet.claimed = false;
@@ -907,20 +908,17 @@ pub mod agent_casino {
         let total_pool = market.total_pool;
         let winning_pool = market.outcome_pools[winning_outcome as usize];
 
-        // Calculate house take (from total pool) - 1% as documented
-        let house_edge = ctx.accounts.house.house_edge_bps;
-        let house_take = total_pool * house_edge as u64 / 10000;
+        // NOTE: House fee is NOT taken here anymore - it's calculated per-bettor at claim time
+        // with early bird discounts. Early bettors get up to 100% fee rebate.
+        // See claim_prediction_winnings for the per-bettor fee calculation.
 
-        // Transfer house take
-        if house_take > 0 {
-            **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= house_take;
-            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += house_take;
-        }
-
-        // Update house stats
+        // Update house stats (volume tracked, fee will be added at claim time)
         let house = &mut ctx.accounts.house;
         house.total_volume = house.total_volume.checked_add(total_pool).unwrap();
-        house.pool = house.pool.checked_add(house_take).unwrap();
+
+        // Calculate what the max house take WOULD be (for event reporting)
+        let house_edge = house.house_edge_bps;
+        let max_house_take = total_pool * house_edge as u64 / 10000;
 
         // Update market state
         let market = &mut ctx.accounts.market;
@@ -933,7 +931,7 @@ pub mod agent_casino {
             winning_outcome,
             total_pool,
             winning_pool,
-            house_take,
+            house_take: max_house_take, // Max possible; actual varies by early bird discounts
         });
 
         Ok(())
@@ -941,16 +939,24 @@ pub mod agent_casino {
 
     /// Claim winnings from a resolved prediction market
     ///
-    /// PARI-MUTUEL PAYOUT CALCULATION:
-    /// winnings = (your_bet / winning_pool) * (total_pool * 0.99)
+    /// PARI-MUTUEL PAYOUT CALCULATION WITH EARLY BIRD FEE REBATE:
     ///
-    /// Example: You bet 10 SOL on outcome A
+    /// Base formula: winnings = (your_bet / winning_pool) * total_pool
+    /// Fee formula:  fee = base_fee * (1 - early_bird_factor)
+    ///
+    /// Early bird factor = time_until_deadline / total_commit_duration
+    ///   - Bet at market creation: 100% factor → 0% fee (full rebate)
+    ///   - Bet at commit deadline: 0% factor → 1% fee (no rebate)
+    ///   - Bet halfway through: 50% factor → 0.5% fee
+    ///
+    /// Example: You bet 10 SOL on outcome A at market creation (100% early)
     ///   - Total pool: 100 SOL
     ///   - Outcome A pool: 40 SOL (your 10 + others' 30)
-    ///   - House takes 1%: 1 SOL
-    ///   - Payout pool: 99 SOL
-    ///   - Your share: (10/40) * 99 = 24.75 SOL
-    ///   - Your profit: 24.75 - 10 = 14.75 SOL (147.5% return)
+    ///   - Your gross share: (10/40) * 100 = 25 SOL
+    ///   - Early bird factor: 1.0 (committed immediately)
+    ///   - Effective fee: 1% * (1 - 1.0) = 0%
+    ///   - Your payout: 25 SOL (no fee!)
+    ///   - Your profit: 25 - 10 = 15 SOL (150% return)
     pub fn claim_prediction_winnings(ctx: Context<ClaimPredictionWinnings>) -> Result<()> {
         let market = &ctx.accounts.market;
         let bet = &ctx.accounts.bet;
@@ -960,23 +966,62 @@ pub mod agent_casino {
         require!(!bet.claimed, CasinoError::AlreadyClaimed);
         require!(bet.outcome_index == market.winning_outcome, CasinoError::DidNotWin);
 
-        // Calculate winnings using pari-mutuel formula
-        // winnings = (bet_amount / winning_pool) * (total_pool - house_take)
+        // Calculate base winnings using pari-mutuel formula (before fee)
         let winning_pool = market.outcome_pools[market.winning_outcome as usize];
         require!(winning_pool > 0, CasinoError::NoWinningBets);
 
-        let house_take = market.total_pool * ctx.accounts.house.house_edge_bps as u64 / 10000;
-        let payout_pool = market.total_pool - house_take;
-
-        let winnings = (bet.amount as u128)
-            .checked_mul(payout_pool as u128)
+        let gross_winnings = (bet.amount as u128)
+            .checked_mul(market.total_pool as u128)
             .unwrap()
             .checked_div(winning_pool as u128)
             .unwrap() as u64;
 
-        // Transfer winnings
-        **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= winnings;
-        **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += winnings;
+        // Calculate early bird discount factor (0-10000 basis points)
+        // early_factor = (commit_deadline - committed_at) / (commit_deadline - created_at)
+        let commit_duration = market.commit_deadline - market.created_at;
+        let time_until_deadline = market.commit_deadline.saturating_sub(bet.committed_at);
+
+        // Calculate early bird factor in basis points (0-10000)
+        let early_factor_bps = if commit_duration > 0 {
+            ((time_until_deadline as u128) * 10000 / (commit_duration as u128)) as u64
+        } else {
+            0
+        };
+        let early_factor_bps = early_factor_bps.min(10000); // Cap at 100%
+
+        // Calculate effective fee with early bird discount
+        // effective_fee_bps = house_edge_bps * (1 - early_factor)
+        let base_fee_bps = ctx.accounts.house.house_edge_bps as u64;
+        let fee_discount_bps = (base_fee_bps * early_factor_bps) / 10000;
+        let effective_fee_bps = base_fee_bps.saturating_sub(fee_discount_bps);
+
+        // Calculate fee amount on gross winnings
+        let fee = (gross_winnings as u128)
+            .checked_mul(effective_fee_bps as u128)
+            .unwrap()
+            .checked_div(10000)
+            .unwrap() as u64;
+
+        let net_winnings = gross_winnings.saturating_sub(fee);
+
+        // Capture keys and values before mutable borrows
+        let market_key = ctx.accounts.market.key();
+        let bettor_key = ctx.accounts.bettor.key();
+        let bet_amount = bet.amount;
+
+        // Transfer net winnings to bettor
+        **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= net_winnings;
+        **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += net_winnings;
+
+        // Transfer fee to house (if any)
+        if fee > 0 {
+            **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= fee;
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += fee;
+
+            // Update house pool
+            let house = &mut ctx.accounts.house;
+            house.pool = house.pool.checked_add(fee).unwrap();
+        }
 
         // Mark as claimed
         let bet = &mut ctx.accounts.bet;
@@ -985,17 +1030,19 @@ pub mod agent_casino {
         // Update agent stats
         let agent_stats = &mut ctx.accounts.agent_stats;
         if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.bettor.key();
+            agent_stats.agent = bettor_key;
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_won = agent_stats.total_won.checked_add(winnings).unwrap();
+        agent_stats.total_won = agent_stats.total_won.checked_add(net_winnings).unwrap();
         agent_stats.wins += 1;
 
         emit!(PredictionWinningsClaimed {
-            market_id: ctx.accounts.market.key(),
-            bettor: ctx.accounts.bettor.key(),
-            bet_amount: bet.amount,
-            winnings,
+            market_id: market_key,
+            bettor: bettor_key,
+            bet_amount,
+            winnings: net_winnings,
+            early_bird_discount_bps: fee_discount_bps as u16,
+            fee_paid: fee,
         });
 
         Ok(())
@@ -1407,7 +1454,7 @@ pub struct ResolvePredictionMarket<'info> {
 
 #[derive(Accounts)]
 pub struct ClaimPredictionWinnings<'info> {
-    #[account(seeds = [b"house"], bump = house.bump)]
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
 
     #[account(
@@ -1572,6 +1619,7 @@ pub struct PredictionBet {
     pub commitment: [u8; 32],            // hash(outcome_index || salt) - hidden until reveal
     pub outcome_index: u8,               // Actual choice (0 until revealed)
     pub amount: u64,
+    pub committed_at: i64,               // Timestamp for early bird bonus calculation
     pub revealed: bool,                  // True after reveal phase
     pub claimed: bool,
     pub bump: u8,
@@ -1743,6 +1791,8 @@ pub struct PredictionWinningsClaimed {
     pub bettor: Pubkey,
     pub bet_amount: u64,
     pub winnings: u64,
+    pub early_bird_discount_bps: u16,  // Basis points of fee discount (0-100 = 0-1%)
+    pub fee_paid: u64,                 // Actual fee paid after early bird discount
 }
 
 #[event]

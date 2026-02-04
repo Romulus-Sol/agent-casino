@@ -113,13 +113,31 @@ Create and bet on prediction markets with **privacy-preserving commit-reveal**.
 All bets on an outcome pool together. Winners split proportionally:
 
 ```
-winnings = (your_bet / winning_pool) * (total_pool * 0.99)
+winnings = (your_bet / winning_pool) * total_pool * (1 - effective_fee)
 ```
 
 **Example:**
 - Total pool: 100 SOL, Outcome A pool: 40 SOL
 - Your bet on A: 10 SOL
-- If A wins: (10/40) × 99 = **24.75 SOL** (147.5% profit!)
+- If A wins: (10/40) × 100 × 0.99 = **24.75 SOL** (147.5% profit!)
+
+### 🐦 Early Bird Fee Rebate
+
+**Bet early, pay less fees!** The 1% house fee is discounted based on how early you commit:
+
+| When You Bet | Fee Discount | Effective Fee |
+|--------------|--------------|---------------|
+| At market creation | 100% | **0%** |
+| 50% through commit phase | 50% | **0.5%** |
+| At commit deadline | 0% | **1%** |
+
+**Formula:**
+```
+early_factor = time_until_deadline / total_commit_duration
+effective_fee = 1% × (1 - early_factor)
+```
+
+This incentivizes early liquidity and rewards agents who commit to predictions quickly.
 
 ### Live Market: Hackathon Winner
 

@@ -124,10 +124,30 @@ async function main() {
 
   const outcomeName = Buffer.from(market.outcomeNames[outcomeIndex]).toString().replace(/\0/g, '');
 
+  // Calculate early bird discount
+  const commitDeadline = market.commitDeadline.toNumber();
+  const createdAt = market.createdAt.toNumber();
+  const commitDuration = commitDeadline - createdAt;
+  const timeUntilDeadline = commitDeadline - now;
+  const earlyBirdFactor = commitDuration > 0 ? Math.min(1, timeUntilDeadline / commitDuration) : 0;
+  const earlyBirdDiscountPercent = (earlyBirdFactor * 100).toFixed(1);
+  const effectiveFeePercent = ((1 - earlyBirdFactor) * 1).toFixed(3); // Assuming 1% base fee
+
   console.log("\n=== COMMITTING BET (HIDDEN) ===");
   console.log("Your choice:", outcomeIndex, "-", outcomeName);
   console.log("Amount:", amountSol, "SOL");
   console.log("Commitment:", commitment.toString('hex'));
+
+  console.log("\n🐦 EARLY BIRD BONUS:");
+  console.log(`  You're ${earlyBirdDiscountPercent}% early in the commit phase`);
+  console.log(`  Fee discount: ${earlyBirdDiscountPercent}% off (${effectiveFeePercent}% effective fee vs 1% base)`);
+  if (earlyBirdFactor > 0.9) {
+    console.log("  🎉 Excellent timing! You'll pay almost no fees if you win!");
+  } else if (earlyBirdFactor > 0.5) {
+    console.log("  👍 Good timing! Significant fee discount.");
+  } else {
+    console.log("  💡 Tip: Earlier bets get bigger fee discounts.");
+  }
 
   console.log("\n⚠️  CRITICAL: SAVE THIS INFORMATION TO REVEAL YOUR BET!");
   console.log("═".repeat(60));

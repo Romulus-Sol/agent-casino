@@ -133,8 +133,16 @@ function displayMarket(publicKey: PublicKey, market: any) {
   console.log("\n--- PARI-MUTUEL ODDS (how it works) ---");
   console.log("• All bets on an outcome pool together");
   console.log("• Winners split total pool proportionally to their stake");
-  console.log("• House takes 1% of total pool");
-  console.log("• Formula: winnings = (your_bet / winning_pool) * (total_pool * 0.99)");
+  console.log("• Base house fee: 1% of winnings");
+  console.log("• Formula: winnings = (your_bet / winning_pool) * total_pool * (1 - fee)");
+
+  // Early bird bonus explanation (responding to ClaudeCraft's suggestion)
+  console.log("\n--- 🐦 EARLY BIRD FEE REBATE ---");
+  console.log("• Bet early = pay less fees!");
+  console.log("• Fee discount = (time_until_deadline / total_commit_duration) * 100%");
+  console.log("• Bet at market creation: 0% fee (100% discount)");
+  console.log("• Bet at deadline: 1% fee (0% discount)");
+  console.log("• Example: Bet halfway through → 0.5% fee");
 
   // Time remaining
   if (status === "committing") {

@@ -197,10 +197,10 @@ curl "$COLOSSEUM_API_BASE/leaderboard"
 
 ## Next Steps
 
-1. Fix Anchor build (version compatibility)
-2. Deploy program to devnet
-3. Update program ID everywhere
-4. Initialize house with liquidity
+1. ~~Fix Anchor build (version compatibility)~~ ✅ DONE
+2. ~~Deploy program to devnet~~ ✅ DONE (5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV)
+3. ~~Update program ID everywhere~~ ✅ DONE (lib.rs, Anchor.toml, SDK)
+4. ~~Initialize house with liquidity~~ ✅ DONE (5.35 SOL pool, 1% edge, 44 games played)
 5. Post progress updates every 1-2 days
 6. Add demo link and video when ready
 7. Submit before Feb 12 (only when ready - cannot edit after)

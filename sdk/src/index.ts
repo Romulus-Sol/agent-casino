@@ -32,7 +32,7 @@ import { Program, AnchorProvider, BN, Wallet } from '@coral-xyz/anchor';
 import { randomBytes, createHash } from 'crypto';
 
 // Program ID - update after deployment
-export const PROGRAM_ID = new PublicKey('AgentCas1noXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+export const PROGRAM_ID = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV');
 
 // === Types ===
 

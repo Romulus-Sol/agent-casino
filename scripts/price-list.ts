@@ -40,7 +40,7 @@ async function main() {
 
   try {
     // Fetch all price prediction accounts
-    const predictions = await program.account.pricePrediction.all();
+    const predictions = await (program.account as any).pricePrediction.all();
 
     if (predictions.length === 0) {
       console.log("No price predictions found.");

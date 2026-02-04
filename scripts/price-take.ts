@@ -46,7 +46,7 @@ async function main() {
   );
 
   // Fetch prediction details
-  const prediction = await program.account.pricePrediction.fetch(predictionAddress);
+  const prediction = await (program.account as any).pricePrediction.fetch(predictionAddress);
 
   const assetName = Object.keys(prediction.asset)[0].toUpperCase();
   const directionName = Object.keys(prediction.direction)[0];
@@ -69,7 +69,7 @@ async function main() {
   console.log("\nTaking opposite side...");
 
   try {
-    const tx = await program.methods
+    const tx = await (program.methods as any)
       .takePricePrediction()
       .accounts({
         house: housePda,

@@ -87,7 +87,7 @@ async function main() {
   );
 
   // Get current game count for PDA
-  const houseAccount = await program.account.house.fetch(housePda);
+  const houseAccount = await (program.account as any).house.fetch(housePda);
   const gameCount = houseAccount.totalGames;
 
   const [pricePredictionPda] = PublicKey.findProgramAddressSync(
@@ -105,7 +105,7 @@ async function main() {
   console.log(`Prediction PDA: ${pricePredictionPda.toString()}`);
 
   try {
-    const tx = await program.methods
+    const tx = await (program.methods as any)
       .createPricePrediction(
         assetEnum,
         new anchor.BN(targetPrice),

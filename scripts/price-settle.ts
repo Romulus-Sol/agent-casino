@@ -53,7 +53,7 @@ async function main() {
   );
 
   // Fetch prediction details
-  const prediction = await program.account.pricePrediction.fetch(predictionAddress);
+  const prediction = await (program.account as any).pricePrediction.fetch(predictionAddress);
 
   const assetName = Object.keys(prediction.asset)[0];
   const directionName = Object.keys(prediction.direction)[0];
@@ -90,7 +90,7 @@ async function main() {
   console.log("\nSettling prediction...");
 
   try {
-    const tx = await program.methods
+    const tx = await (program.methods as any)
       .settlePricePrediction()
       .accounts({
         house: housePda,
@@ -106,7 +106,7 @@ async function main() {
     console.log(`\nTransaction: ${tx}`);
 
     // Fetch updated prediction
-    const updatedPrediction = await program.account.pricePrediction.fetch(predictionAddress);
+    const updatedPrediction = await (program.account as any).pricePrediction.fetch(predictionAddress);
     const settledPrice = updatedPrediction.settledPrice.toNumber() / 1e8;
     const winner = updatedPrediction.winner.toString();
 

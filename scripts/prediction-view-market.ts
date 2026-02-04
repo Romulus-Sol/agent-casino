@@ -6,7 +6,6 @@ import * as path from "path";
 const PROGRAM_ID = new PublicKey("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
 async function main() {
-  // Get market ID from command line (optional)
   const marketIdStr = process.argv[2];
 
   // Load wallet
@@ -49,53 +48,103 @@ async function main() {
 
     for (const { publicKey, account } of markets) {
       displayMarket(publicKey, account);
-      console.log("\n" + "=".repeat(60) + "\n");
+      console.log("\n" + "=".repeat(70) + "\n");
     }
   }
 }
 
 function displayMarket(publicKey: PublicKey, market: any) {
   const status = Object.keys(market.status)[0];
-  const closesAt = new Date(market.closesAt.toNumber() * 1000);
+  const commitDeadline = new Date(market.commitDeadline.toNumber() * 1000);
+  const revealDeadline = new Date(market.revealDeadline.toNumber() * 1000);
   const createdAt = new Date(market.createdAt.toNumber() * 1000);
+  const now = Date.now();
 
   console.log("Market ID:", publicKey.toString());
   console.log("Question:", market.question);
-  console.log("Status:", status.toUpperCase());
   console.log("Created:", createdAt.toISOString());
-  console.log("Closes:", closesAt.toISOString());
-  console.log("Total Pool:", (market.totalPool.toNumber() / LAMPORTS_PER_SOL).toFixed(4), "SOL");
+
+  // Status with phase indicator
+  console.log("\n--- COMMIT-REVEAL STATUS ---");
+  const statusEmoji = {
+    committing: "🔒",
+    revealing: "👁️",
+    resolved: "✅",
+    cancelled: "❌"
+  }[status] || "?";
+  console.log(`Status: ${statusEmoji} ${status.toUpperCase()}`);
+
+  // Phase timing
+  console.log("\nPhases:");
+  const commitPassed = now > commitDeadline.getTime();
+  const revealPassed = now > revealDeadline.getTime();
+
+  console.log(`  1. COMMIT: ${commitDeadline.toISOString()} ${commitPassed ? '(ended)' : '(active)'}`);
+  console.log(`  2. REVEAL: ${revealDeadline.toISOString()} ${revealPassed ? '(ended)' : (commitPassed ? '(active)' : '(waiting)')}`);
 
   if (status === "resolved") {
-    console.log("Winning Outcome:", market.winningOutcome);
-    console.log("Resolved At:", new Date(market.resolvedAt.toNumber() * 1000).toISOString());
+    const resolvedAt = new Date(market.resolvedAt.toNumber() * 1000);
+    console.log(`  3. RESOLVED: ${resolvedAt.toISOString()}`);
   }
 
-  console.log("\nOutcomes & Odds:");
-  for (let i = 0; i < market.outcomeCount; i++) {
-    const name = Buffer.from(market.outcomeNames[i]).toString().replace(/\0/g, '');
-    const pool = market.outcomePools[i].toNumber() / LAMPORTS_PER_SOL;
-    const percentage = market.totalPool.toNumber() > 0
-      ? ((market.outcomePools[i].toNumber() / market.totalPool.toNumber()) * 100).toFixed(1)
-      : "0.0";
+  // Pool info
+  console.log("\n--- POOL INFO ---");
+  console.log("Total Committed:", (market.totalCommitted.toNumber() / LAMPORTS_PER_SOL).toFixed(4), "SOL");
 
-    // Calculate implied probability and potential return
-    const impliedProb = market.totalPool.toNumber() > 0
-      ? (market.outcomePools[i].toNumber() / market.totalPool.toNumber())
-      : 0;
-    const potentialMultiplier = impliedProb > 0 ? ((1 - 0.01) / impliedProb).toFixed(2) : "∞";
-
-    const isWinner = status === "resolved" && market.winningOutcome === i;
-    const marker = isWinner ? " 🏆" : "";
-
-    console.log(`  [${i}] ${name.padEnd(20)} | ${pool.toFixed(4).padStart(10)} SOL | ${percentage.padStart(5)}% | ${potentialMultiplier}x${marker}`);
+  if (status === "revealing" || status === "resolved") {
+    console.log("Total Pool (after reveals):", (market.totalPool.toNumber() / LAMPORTS_PER_SOL).toFixed(4), "SOL");
   }
 
-  if (status === "open") {
-    const now = Date.now();
-    const closeTime = closesAt.getTime();
-    const hoursLeft = Math.max(0, (closeTime - now) / (1000 * 60 * 60));
-    console.log(`\n⏰ Betting closes in ${hoursLeft.toFixed(1)} hours`);
+  // Outcomes
+  console.log("\n--- OUTCOMES ---");
+  if (status === "committing") {
+    console.log("(Bets are hidden during commit phase)");
+    console.log("");
+    for (let i = 0; i < market.outcomeCount; i++) {
+      const name = Buffer.from(market.outcomeNames[i]).toString().replace(/\0/g, '');
+      console.log(`  [${i}] ${name}`);
+    }
+  } else {
+    // Show revealed pools
+    const totalPool = market.totalPool.toNumber();
+    console.log("(Revealed bets after commit phase)");
+    console.log("");
+    for (let i = 0; i < market.outcomeCount; i++) {
+      const name = Buffer.from(market.outcomeNames[i]).toString().replace(/\0/g, '');
+      const pool = market.outcomePools[i].toNumber() / LAMPORTS_PER_SOL;
+      const percentage = totalPool > 0
+        ? ((market.outcomePools[i].toNumber() / totalPool) * 100).toFixed(1)
+        : "0.0";
+
+      // Implied odds for pari-mutuel (ClaudeCraft's question)
+      const impliedProb = totalPool > 0
+        ? (market.outcomePools[i].toNumber() / totalPool)
+        : 0;
+      const potentialMultiplier = impliedProb > 0 ? ((0.99) / impliedProb).toFixed(2) : "∞";
+
+      const isWinner = status === "resolved" && market.winningOutcome === i;
+      const marker = isWinner ? " 🏆 WINNER" : "";
+
+      console.log(`  [${i}] ${name.padEnd(20)} | ${pool.toFixed(4).padStart(10)} SOL | ${percentage.padStart(5)}% | ${potentialMultiplier}x${marker}`);
+    }
+  }
+
+  // Pari-mutuel explanation (responding to ClaudeCraft)
+  console.log("\n--- PARI-MUTUEL ODDS (how it works) ---");
+  console.log("• All bets on an outcome pool together");
+  console.log("• Winners split total pool proportionally to their stake");
+  console.log("• House takes 1% of total pool");
+  console.log("• Formula: winnings = (your_bet / winning_pool) * (total_pool * 0.99)");
+
+  // Time remaining
+  if (status === "committing") {
+    const hoursLeft = Math.max(0, (commitDeadline.getTime() - now) / (1000 * 60 * 60));
+    console.log(`\n⏰ Commit phase ends in ${hoursLeft.toFixed(1)} hours`);
+    console.log("   Bets are hidden - no one can see your choice!");
+  } else if (status === "revealing") {
+    const hoursLeft = Math.max(0, (revealDeadline.getTime() - now) / (1000 * 60 * 60));
+    console.log(`\n⏰ Reveal phase ends in ${hoursLeft.toFixed(1)} hours`);
+    console.log("   Unrevealed bets will be forfeited!");
   }
 }
 

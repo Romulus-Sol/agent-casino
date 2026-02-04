@@ -612,17 +612,47 @@ pub mod agent_casino {
     }
 
     // ==================== PREDICTION MARKETS ====================
+    //
+    // PARI-MUTUEL ODDS CALCULATION (responding to ClaudeCraft's question):
+    // ====================================================================
+    // All bets on an outcome pool together. Winners split the total pool
+    // proportionally to their stake, minus house edge.
+    //
+    // Formula: winnings = (your_bet / winning_pool) * (total_pool * 0.99)
+    //
+    // Example with 100 SOL total pool, 1% house edge:
+    //   - Outcome A pool: 40 SOL (40% implied probability)
+    //   - Outcome B pool: 60 SOL (60% implied probability)
+    //   - If A wins: A bettors split 99 SOL proportionally
+    //   - A bettor with 10 SOL gets: (10/40) * 99 = 24.75 SOL (2.475x return)
+    //
+    // Odds update dynamically as more bets come in. Early bettors on
+    // underdog outcomes get better odds if the pool stays small.
+    //
+    // COMMIT-REVEAL PATTERN (responding to Sipher's privacy suggestion):
+    // ==================================================================
+    // Bets are hidden until the reveal phase to prevent:
+    //   - Front-running: Can't see and copy others' bets
+    //   - Strategy copying: Predictions stay private during betting
+    //   - Last-minute manipulation: Can't game odds at deadline
+    //
+    // Phase 1 (Commit): Submit hash(outcome || salt) + lock funds
+    // Phase 2 (Reveal): After betting closes, reveal choice (verified by hash)
+    // Phase 3 (Resolve): Authority declares winning outcome
+    // Phase 4 (Claim): Winners claim proportional winnings
 
-    /// Create a new prediction market
+    /// Create a new prediction market with commit-reveal betting
     /// question: Short description (e.g., "Which project wins 1st place?")
     /// outcomes: Array of outcome names (e.g., ["agent-casino", "clawverse", "sipher"])
-    /// closes_at: Unix timestamp when betting closes
+    /// commit_deadline: Unix timestamp when commit phase ends
+    /// reveal_deadline: Unix timestamp when reveal phase ends (must be after commit_deadline)
     pub fn create_prediction_market(
         ctx: Context<CreatePredictionMarket>,
         market_id: u64,
         question: String,
         outcomes: Vec<String>,
-        closes_at: i64,
+        commit_deadline: i64,
+        reveal_deadline: i64,
     ) -> Result<()> {
         require!(outcomes.len() >= 2 && outcomes.len() <= 10, CasinoError::InvalidOutcomeCount);
         require!(question.len() <= 200, CasinoError::QuestionTooLong);
@@ -631,17 +661,20 @@ pub mod agent_casino {
         }
 
         let clock = Clock::get()?;
-        require!(closes_at > clock.unix_timestamp, CasinoError::InvalidCloseTime);
+        require!(commit_deadline > clock.unix_timestamp, CasinoError::InvalidCloseTime);
+        require!(reveal_deadline > commit_deadline, CasinoError::RevealMustBeAfterCommit);
 
         let market = &mut ctx.accounts.market;
         market.authority = ctx.accounts.authority.key();
         market.market_id = market_id;
         market.question = question.clone();
         market.outcome_count = outcomes.len() as u8;
-        market.status = MarketStatus::Open;
+        market.status = MarketStatus::Committing;
         market.winning_outcome = 0;
         market.total_pool = 0;
-        market.closes_at = closes_at;
+        market.total_committed = 0;
+        market.commit_deadline = commit_deadline;
+        market.reveal_deadline = reveal_deadline;
         market.resolved_at = 0;
         market.created_at = clock.unix_timestamp;
         market.bump = ctx.bumps.market;
@@ -662,25 +695,30 @@ pub mod agent_casino {
             authority: ctx.accounts.authority.key(),
             question,
             outcome_count: outcomes.len() as u8,
-            closes_at,
+            commit_deadline,
+            reveal_deadline,
         });
 
         Ok(())
     }
 
-    /// Place a bet on a prediction market outcome
-    pub fn place_prediction_bet(
-        ctx: Context<PlacePredictionBet>,
-        outcome_index: u8,
+    /// COMMIT PHASE: Submit a hidden bet commitment
+    /// commitment: hash(outcome_index || salt) - 32 bytes
+    /// amount: SOL to lock (bet size is public, choice is hidden)
+    ///
+    /// Bettors can see pool sizes but NOT which outcomes others picked.
+    /// This prevents front-running and strategy copying.
+    pub fn commit_prediction_bet(
+        ctx: Context<CommitPredictionBet>,
+        commitment: [u8; 32],
         amount: u64,
     ) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
-        require!(outcome_index < market.outcome_count, CasinoError::InvalidOutcome);
+        require!(market.status == MarketStatus::Committing, CasinoError::NotInCommitPhase);
         require!(amount > 0, CasinoError::InvalidAmount);
 
         let clock = Clock::get()?;
-        require!(clock.unix_timestamp < market.closes_at, CasinoError::BettingClosed);
+        require!(clock.unix_timestamp < market.commit_deadline, CasinoError::CommitPhaseClosed);
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
@@ -699,66 +737,177 @@ pub mod agent_casino {
         );
         system_program::transfer(cpi_context, amount)?;
 
-        // Update market pools
+        // Update market total (but NOT outcome pools - those stay hidden)
+        let market = &mut ctx.accounts.market;
+        market.total_committed = market.total_committed.checked_add(amount).unwrap();
+
+        // Store commitment
+        let bet = &mut ctx.accounts.bet;
+        require!(bet.bettor == Pubkey::default(), CasinoError::AlreadyCommitted);
+        bet.bettor = bettor_key;
+        bet.market = market_key;
+        bet.commitment = commitment;
+        bet.amount = amount;
+        bet.revealed = false;
+        bet.outcome_index = 0; // Unknown until reveal
+        bet.claimed = false;
+        bet.bump = ctx.bumps.bet;
+
+        emit!(PredictionBetCommitted {
+            market_id: market_key,
+            bettor: bettor_key,
+            commitment,
+            amount,
+            total_committed: market.total_committed,
+        });
+
+        Ok(())
+    }
+
+    /// Transition market from Committing to Revealing phase
+    /// Anyone can call this after commit_deadline passes
+    pub fn start_reveal_phase(ctx: Context<StartRevealPhase>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Committing, CasinoError::NotInCommitPhase);
+
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp >= market.commit_deadline, CasinoError::CommitPhaseNotEnded);
+
+        // Capture key before mutable borrow
+        let market_key = ctx.accounts.market.key();
+
+        let market = &mut ctx.accounts.market;
+        market.status = MarketStatus::Revealing;
+        market.total_pool = market.total_committed; // Lock in total pool
+
+        let total_committed = market.total_committed;
+
+        emit!(RevealPhaseStarted {
+            market_id: market_key,
+            total_committed,
+        });
+
+        Ok(())
+    }
+
+    /// REVEAL PHASE: Reveal your committed bet
+    /// outcome_index: Your actual pick (0 to outcome_count-1)
+    /// salt: Random bytes used in commitment
+    ///
+    /// Verifies: hash(outcome_index || salt) == stored commitment
+    /// Updates outcome pools with revealed bets
+    pub fn reveal_prediction_bet(
+        ctx: Context<RevealPredictionBet>,
+        outcome_index: u8,
+        salt: [u8; 32],
+    ) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Revealing, CasinoError::NotInRevealPhase);
+        require!(outcome_index < market.outcome_count, CasinoError::InvalidOutcome);
+
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp < market.reveal_deadline, CasinoError::RevealPhaseClosed);
+
+        let bet = &ctx.accounts.bet;
+        require!(!bet.revealed, CasinoError::AlreadyRevealed);
+
+        // Verify commitment: hash(outcome_index || salt) must equal stored commitment
+        let mut preimage = [0u8; 33];
+        preimage[0] = outcome_index;
+        preimage[1..33].copy_from_slice(&salt);
+        let computed_hash = mix_bytes(&preimage);
+        require!(computed_hash == bet.commitment, CasinoError::InvalidReveal);
+
+        let amount = bet.amount;
+        let market_key = ctx.accounts.market.key();
+        let bettor_key = ctx.accounts.bettor.key();
+
+        // Update outcome pool with revealed bet
         let market = &mut ctx.accounts.market;
         market.outcome_pools[outcome_index as usize] = market.outcome_pools[outcome_index as usize]
             .checked_add(amount)
             .unwrap();
-        market.total_pool = market.total_pool.checked_add(amount).unwrap();
 
-        let outcome_pool = market.outcome_pools[outcome_index as usize];
-        let total_pool = market.total_pool;
-
-        // Initialize or update bet record
+        // Mark bet as revealed
         let bet = &mut ctx.accounts.bet;
-        if bet.bettor == Pubkey::default() {
-            bet.bettor = bettor_key;
-            bet.market = market_key;
-            bet.outcome_index = outcome_index;
-            bet.amount = amount;
-            bet.claimed = false;
-            bet.bump = ctx.bumps.bet;
-        } else {
-            // Adding to existing bet on same outcome
-            require!(bet.outcome_index == outcome_index, CasinoError::CannotChangeBetOutcome);
-            bet.amount = bet.amount.checked_add(amount).unwrap();
-        }
+        bet.revealed = true;
+        bet.outcome_index = outcome_index;
 
-        let total_bet = bet.amount;
-
-        emit!(PredictionBetPlaced {
+        emit!(PredictionBetRevealed {
             market_id: market_key,
             bettor: bettor_key,
             outcome_index,
             amount,
-            total_bet,
-            outcome_pool,
-            total_pool,
+            outcome_pool: market.outcome_pools[outcome_index as usize],
+        });
+
+        Ok(())
+    }
+
+    /// Forfeit unrevealed bet (after reveal deadline)
+    /// Unrevealed bets go to the house as penalty for not revealing
+    pub fn forfeit_unrevealed_bet(ctx: Context<ForfeitUnrevealedBet>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp >= market.reveal_deadline, CasinoError::RevealPhaseNotEnded);
+
+        let bet = &ctx.accounts.bet;
+        require!(!bet.revealed, CasinoError::AlreadyRevealed);
+        require!(!bet.claimed, CasinoError::AlreadyClaimed);
+
+        let forfeit_amount = bet.amount;
+
+        // Transfer forfeited amount to house
+        **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= forfeit_amount;
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? += forfeit_amount;
+
+        // Update house stats
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_add(forfeit_amount).unwrap();
+
+        // Reduce total pool (forfeit doesn't count toward payouts)
+        let market = &mut ctx.accounts.market;
+        market.total_pool = market.total_pool.saturating_sub(forfeit_amount);
+
+        // Mark as claimed to prevent double-forfeit
+        let bet = &mut ctx.accounts.bet;
+        bet.claimed = true;
+
+        emit!(BetForfeited {
+            market_id: ctx.accounts.market.key(),
+            bettor: bet.bettor,
+            amount: forfeit_amount,
         });
 
         Ok(())
     }
 
     /// Resolve a prediction market (authority only)
+    /// Can only be called after reveal phase ends
     pub fn resolve_prediction_market(
         ctx: Context<ResolvePredictionMarket>,
         winning_outcome: u8,
     ) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
+        require!(
+            market.status == MarketStatus::Revealing || market.status == MarketStatus::Committing,
+            CasinoError::MarketNotOpen
+        );
         require!(winning_outcome < market.outcome_count, CasinoError::InvalidOutcome);
         require!(
             ctx.accounts.authority.key() == market.authority,
             CasinoError::NotMarketAuthority
         );
 
+        let clock = Clock::get()?;
+        require!(clock.unix_timestamp >= market.reveal_deadline, CasinoError::RevealPhaseNotEnded);
+
         // Capture values before mutable borrow
         let market_key = ctx.accounts.market.key();
         let total_pool = market.total_pool;
         let winning_pool = market.outcome_pools[winning_outcome as usize];
-        let clock = Clock::get()?;
 
-        // Calculate house take (from total pool)
+        // Calculate house take (from total pool) - 1% as documented
         let house_edge = ctx.accounts.house.house_edge_bps;
         let house_take = total_pool * house_edge as u64 / 10000;
 
@@ -791,16 +940,31 @@ pub mod agent_casino {
     }
 
     /// Claim winnings from a resolved prediction market
+    ///
+    /// PARI-MUTUEL PAYOUT CALCULATION:
+    /// winnings = (your_bet / winning_pool) * (total_pool * 0.99)
+    ///
+    /// Example: You bet 10 SOL on outcome A
+    ///   - Total pool: 100 SOL
+    ///   - Outcome A pool: 40 SOL (your 10 + others' 30)
+    ///   - House takes 1%: 1 SOL
+    ///   - Payout pool: 99 SOL
+    ///   - Your share: (10/40) * 99 = 24.75 SOL
+    ///   - Your profit: 24.75 - 10 = 14.75 SOL (147.5% return)
     pub fn claim_prediction_winnings(ctx: Context<ClaimPredictionWinnings>) -> Result<()> {
         let market = &ctx.accounts.market;
         let bet = &ctx.accounts.bet;
 
         require!(market.status == MarketStatus::Resolved, CasinoError::MarketNotResolved);
+        require!(bet.revealed, CasinoError::BetNotRevealed);
         require!(!bet.claimed, CasinoError::AlreadyClaimed);
         require!(bet.outcome_index == market.winning_outcome, CasinoError::DidNotWin);
 
-        // Calculate winnings: (bet_amount / winning_pool) * (total_pool - house_take)
+        // Calculate winnings using pari-mutuel formula
+        // winnings = (bet_amount / winning_pool) * (total_pool - house_take)
         let winning_pool = market.outcome_pools[market.winning_outcome as usize];
+        require!(winning_pool > 0, CasinoError::NoWinningBets);
+
         let house_take = market.total_pool * ctx.accounts.house.house_edge_bps as u64 / 10000;
         let payout_pool = market.total_pool - house_take;
 
@@ -837,10 +1001,14 @@ pub mod agent_casino {
         Ok(())
     }
 
-    /// Cancel an open prediction market and refund all bettors (authority only)
+    /// Cancel a prediction market and allow refunds (authority only)
+    /// Can cancel during Committing or Revealing phase
     pub fn cancel_prediction_market(ctx: Context<CancelPredictionMarket>) -> Result<()> {
         let market = &ctx.accounts.market;
-        require!(market.status == MarketStatus::Open, CasinoError::MarketNotOpen);
+        require!(
+            market.status == MarketStatus::Committing || market.status == MarketStatus::Revealing,
+            CasinoError::MarketNotOpen
+        );
         require!(
             ctx.accounts.authority.key() == market.authority,
             CasinoError::NotMarketAuthority
@@ -1127,7 +1295,7 @@ pub struct CancelChallenge<'info> {
 // === Prediction Market Account Structures ===
 
 #[derive(Accounts)]
-#[instruction(market_id: u64, question: String, outcomes: Vec<String>, closes_at: i64)]
+#[instruction(market_id: u64, question: String, outcomes: Vec<String>, commit_deadline: i64, reveal_deadline: i64)]
 pub struct CreatePredictionMarket<'info> {
     #[account(seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
@@ -1146,20 +1314,21 @@ pub struct CreatePredictionMarket<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// COMMIT PHASE: Submit hidden bet (hash only)
 #[derive(Accounts)]
-#[instruction(outcome_index: u8, amount: u64)]
-pub struct PlacePredictionBet<'info> {
+#[instruction(commitment: [u8; 32], amount: u64)]
+pub struct CommitPredictionBet<'info> {
     #[account(seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
 
     #[account(
         mut,
-        constraint = market.status == MarketStatus::Open @ CasinoError::MarketNotOpen
+        constraint = market.status == MarketStatus::Committing @ CasinoError::NotInCommitPhase
     )]
     pub market: Account<'info, PredictionMarket>,
 
     #[account(
-        init_if_needed,
+        init,
         payer = bettor,
         space = 8 + PredictionBet::INIT_SPACE,
         seeds = [b"pred_bet", market.key().as_ref(), bettor.key().as_ref()],
@@ -1170,6 +1339,55 @@ pub struct PlacePredictionBet<'info> {
     #[account(mut)]
     pub bettor: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+// Transition from Committing to Revealing
+#[derive(Accounts)]
+pub struct StartRevealPhase<'info> {
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Committing @ CasinoError::NotInCommitPhase
+    )]
+    pub market: Account<'info, PredictionMarket>,
+}
+
+// REVEAL PHASE: Reveal your committed bet
+#[derive(Accounts)]
+#[instruction(outcome_index: u8, salt: [u8; 32])]
+pub struct RevealPredictionBet<'info> {
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Revealing @ CasinoError::NotInRevealPhase
+    )]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(
+        mut,
+        seeds = [b"pred_bet", market.key().as_ref(), bettor.key().as_ref()],
+        bump = bet.bump,
+        constraint = bet.bettor == bettor.key() @ CasinoError::NotBetOwner
+    )]
+    pub bet: Account<'info, PredictionBet>,
+
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+}
+
+// Forfeit unrevealed bet after reveal deadline
+#[derive(Accounts)]
+pub struct ForfeitUnrevealedBet<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(mut)]
+    pub market: Account<'info, PredictionMarket>,
+
+    #[account(
+        mut,
+        seeds = [b"pred_bet", market.key().as_ref(), bet.bettor.as_ref()],
+        bump = bet.bump
+    )]
+    pub bet: Account<'info, PredictionBet>,
 }
 
 #[derive(Accounts)]
@@ -1224,8 +1442,7 @@ pub struct ClaimPredictionWinnings<'info> {
 pub struct CancelPredictionMarket<'info> {
     #[account(
         mut,
-        constraint = market.authority == authority.key() @ CasinoError::NotMarketAuthority,
-        constraint = market.status == MarketStatus::Open @ CasinoError::MarketNotOpen
+        constraint = market.authority == authority.key() @ CasinoError::NotMarketAuthority
     )]
     pub market: Account<'info, PredictionMarket>,
 
@@ -1335,11 +1552,13 @@ pub struct PredictionMarket {
     pub question: String,
     pub outcome_count: u8,
     pub outcome_names: [[u8; 32]; 10],  // Up to 10 outcomes, 32 bytes each
-    pub outcome_pools: [u64; 10],        // Pool for each outcome
-    pub total_pool: u64,
+    pub outcome_pools: [u64; 10],        // Pool for each outcome (populated after reveals)
+    pub total_pool: u64,                 // Final pool after reveal phase
+    pub total_committed: u64,            // Amount committed (before reveals)
     pub status: MarketStatus,
     pub winning_outcome: u8,
-    pub closes_at: i64,
+    pub commit_deadline: i64,            // When commit phase ends
+    pub reveal_deadline: i64,            // When reveal phase ends
     pub resolved_at: i64,
     pub created_at: i64,
     pub bump: u8,
@@ -1350,8 +1569,10 @@ pub struct PredictionMarket {
 pub struct PredictionBet {
     pub bettor: Pubkey,
     pub market: Pubkey,
-    pub outcome_index: u8,
+    pub commitment: [u8; 32],            // hash(outcome_index || salt) - hidden until reveal
+    pub outcome_index: u8,               // Actual choice (0 until revealed)
     pub amount: u64,
+    pub revealed: bool,                  // True after reveal phase
     pub claimed: bool,
     pub bump: u8,
 }
@@ -1375,9 +1596,10 @@ pub enum ChallengeStatus {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
 pub enum MarketStatus {
-    Open,
-    Resolved,
-    Cancelled,
+    Committing,   // Phase 1: Bets are hidden (commit hash only)
+    Revealing,    // Phase 2: Bettors reveal their choices
+    Resolved,     // Phase 3: Winner declared, payouts available
+    Cancelled,    // Market cancelled, refunds available
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -1471,18 +1693,39 @@ pub struct PredictionMarketCreated {
     pub authority: Pubkey,
     pub question: String,
     pub outcome_count: u8,
-    pub closes_at: i64,
+    pub commit_deadline: i64,
+    pub reveal_deadline: i64,
 }
 
 #[event]
-pub struct PredictionBetPlaced {
+pub struct PredictionBetCommitted {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub commitment: [u8; 32],  // Hash only - choice is hidden
+    pub amount: u64,
+    pub total_committed: u64,
+}
+
+#[event]
+pub struct RevealPhaseStarted {
+    pub market_id: Pubkey,
+    pub total_committed: u64,
+}
+
+#[event]
+pub struct PredictionBetRevealed {
     pub market_id: Pubkey,
     pub bettor: Pubkey,
     pub outcome_index: u8,
     pub amount: u64,
-    pub total_bet: u64,
     pub outcome_pool: u64,
-    pub total_pool: u64,
+}
+
+#[event]
+pub struct BetForfeited {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub amount: u64,
 }
 
 #[event]
@@ -1569,4 +1812,29 @@ pub enum CasinoError {
     NotBetOwner,
     #[msg("Cannot change bet outcome after placing")]
     CannotChangeBetOutcome,
+    // Commit-reveal errors
+    #[msg("Reveal deadline must be after commit deadline")]
+    RevealMustBeAfterCommit,
+    #[msg("Market is not in commit phase")]
+    NotInCommitPhase,
+    #[msg("Commit phase has closed")]
+    CommitPhaseClosed,
+    #[msg("Commit phase has not ended yet")]
+    CommitPhaseNotEnded,
+    #[msg("Market is not in reveal phase")]
+    NotInRevealPhase,
+    #[msg("Reveal phase has closed")]
+    RevealPhaseClosed,
+    #[msg("Reveal phase has not ended yet")]
+    RevealPhaseNotEnded,
+    #[msg("Already committed a bet")]
+    AlreadyCommitted,
+    #[msg("Already revealed this bet")]
+    AlreadyRevealed,
+    #[msg("Invalid reveal - hash does not match commitment")]
+    InvalidReveal,
+    #[msg("Bet was not revealed")]
+    BetNotRevealed,
+    #[msg("No winning bets - cannot claim")]
+    NoWinningBets,
 }

@@ -49,18 +49,35 @@ async function main() {
     "other"
   ];
 
-  // Close in 9 days (Feb 12 deadline)
-  const closesAt = new anchor.BN(Math.floor(Date.now() / 1000) + 9 * 24 * 60 * 60);
+  // COMMIT-REVEAL TIMING (based on community feedback from Sipher):
+  // - Commit phase: 7 days (until Feb 11)
+  // - Reveal phase: 1 day (Feb 11-12)
+  // - Resolution: After Feb 12 (hackathon ends)
+  const now = Math.floor(Date.now() / 1000);
+  const commitDeadline = new anchor.BN(now + 7 * 24 * 60 * 60);  // 7 days
+  const revealDeadline = new anchor.BN(now + 8 * 24 * 60 * 60);  // 8 days (1 day reveal window)
 
-  console.log("\n--- Creating Prediction Market ---");
+  console.log("\n=== PREDICTION MARKET WITH COMMIT-REVEAL ===");
+  console.log("(Implementing Sipher's privacy suggestion)\n");
   console.log("Question:", question);
   console.log("Outcomes:", outcomes.join(", "));
-  console.log("Closes at:", new Date(closesAt.toNumber() * 1000).toISOString());
-  console.log("Market PDA:", marketPda.toString());
+  console.log("\nPhases:");
+  console.log("  Commit Phase Ends:", new Date(commitDeadline.toNumber() * 1000).toISOString());
+  console.log("  Reveal Phase Ends:", new Date(revealDeadline.toNumber() * 1000).toISOString());
+  console.log("\nMarket PDA:", marketPda.toString());
+
+  console.log("\n--- How Commit-Reveal Works ---");
+  console.log("1. COMMIT: Submit hash(outcome || salt) + lock SOL");
+  console.log("   -> Your bet amount is public, but your CHOICE is hidden");
+  console.log("   -> Prevents front-running and strategy copying");
+  console.log("2. REVEAL: After commit deadline, reveal your choice");
+  console.log("   -> Hash is verified to prove you didn't change your mind");
+  console.log("3. RESOLVE: Authority declares winner");
+  console.log("4. CLAIM: Winners claim proportional share (pari-mutuel)");
 
   try {
     const tx = await program.methods
-      .createPredictionMarket(marketId, question, outcomes, closesAt)
+      .createPredictionMarket(marketId, question, outcomes, commitDeadline, revealDeadline)
       .accounts({
         house: housePda,
         market: marketPda,
@@ -69,14 +86,14 @@ async function main() {
       })
       .rpc();
 
-    console.log("\nPrediction market created!");
+    console.log("\n✅ Prediction market created!");
     console.log("Transaction:", tx);
     console.log("\n=== MARKET INFO ===");
     console.log("Market ID:", marketPda.toString());
-    console.log("Question:", question);
     console.log("\nOutcomes:");
     outcomes.forEach((o, i) => console.log(`  ${i}: ${o}`));
-    console.log("\nShare this Market ID with agents to place bets!");
+    console.log("\nShare this Market ID with agents to place hidden bets!");
+    console.log("Use: npx ts-node scripts/prediction-commit-bet.ts", marketPda.toString(), "<OUTCOME> <AMOUNT>");
 
   } catch (e: any) {
     console.error("\nError creating market:", e.message);

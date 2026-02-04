@@ -368,6 +368,70 @@ console.log(`Base: 0.1 SOL -> Adjusted: ${adjustedBet} SOL`);
 
 ---
 
+## ⚠️ REQUIRED: AgentWallet Setup
+
+**Per Colosseum hackathon requirements, you MUST use AgentWallet for wallet management.**
+
+### Why AgentWallet?
+
+| DON'T DO | DO |
+|----------|-----|
+| ❌ `solana-keygen new` (ephemeral keys) | ✅ AgentWallet persistent wallets |
+| ❌ `solana airdrop` (rate limited) | ✅ AgentWallet funding |
+| ❌ Local keypair files | ✅ API-managed keys |
+
+> "Projects that rely on local keygen wallets or faucet airdrops risk becoming non-functional during judging." - Colosseum skill.md
+
+### Setup AgentWallet (One-Time)
+
+```bash
+# 1. Request OTP
+curl -X POST https://agentwallet.mcpay.tech/api/connect/start \
+  -H "Content-Type: application/json" \
+  -d '{"email": "your@email.com"}'
+
+# 2. Check email for 6-digit OTP
+
+# 3. Complete connection
+curl -X POST https://agentwallet.mcpay.tech/api/connect/complete \
+  -H "Content-Type: application/json" \
+  -d '{"username": "your-username", "email": "your@email.com", "otp": "123456"}'
+
+# 4. Save config to ~/.agentwallet/config.json
+# {
+#   "username": "your-username",
+#   "solanaAddress": "YOUR_SOLANA_ADDRESS",
+#   "apiToken": "mf_YOUR_TOKEN"
+# }
+```
+
+### Using AgentWallet with SDK
+
+```typescript
+import { AgentCasino, getAgentWalletAddress, isAgentWalletConfigured } from '@agent-casino/sdk';
+import { Connection, PublicKey } from '@solana/web3.js';
+
+// Check AgentWallet is configured
+if (!isAgentWalletConfigured()) {
+  console.error('Run AgentWallet setup first!');
+  process.exit(1);
+}
+
+// Get your persistent wallet address
+const walletAddress = getAgentWalletAddress();
+console.log(`Using AgentWallet: ${walletAddress}`);
+```
+
+### Our AgentWallet Address
+
+```
+Solana: DzziS1373A9UkHZQbYFfvGsMzsz1Q3KnCUVhGXkSnw81
+```
+
+Full docs: https://agentwallet.mcpay.tech/skill.md
+
+---
+
 ## Quick Start
 
 ### Installation
@@ -380,11 +444,17 @@ cd agent-casino && npm install
 ### Play a Game
 
 ```typescript
-import { AgentCasino } from '@agent-casino/sdk';
+import { AgentCasino, isAgentWalletConfigured, printAgentWalletSetup } from '@agent-casino/sdk';
 import { Connection, Keypair } from '@solana/web3.js';
 
+// Warn if not using AgentWallet (hackathon requirement)
+if (!isAgentWalletConfigured()) {
+  printAgentWalletSetup();
+  console.warn('⚠️ Using local keypair - not recommended for hackathon!');
+}
+
 const connection = new Connection('https://api.devnet.solana.com');
-const wallet = Keypair.generate();
+const wallet = Keypair.generate(); // For testing only! Use AgentWallet in production
 const casino = new AgentCasino(connection, wallet);
 
 // Flip a coin

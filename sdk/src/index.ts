@@ -1334,6 +1334,34 @@ class KeypairWallet implements Wallet {
   }
 }
 
+// === AgentWallet Integration ===
+
+// Re-export AgentWallet utilities for hackathon compliance
+export {
+  loadAgentWalletConfig,
+  getAgentWalletAddress,
+  isAgentWalletConfigured,
+  getAgentWalletBalances,
+  transferSolana as agentWalletTransfer,
+  signMessage as agentWalletSignMessage,
+  printSetupInstructions as printAgentWalletSetup,
+  type AgentWalletConfig,
+} from './agentwallet';
+
+/**
+ * Get the recommended wallet address for Agent Casino
+ * Uses AgentWallet if configured (hackathon compliant), falls back to provided keypair
+ */
+export function getRecommendedWalletAddress(fallbackKeypair?: Keypair): string | null {
+  // Prefer AgentWallet (hackathon requirement)
+  const agentWalletAddress = require('./agentwallet').getAgentWalletAddress();
+  if (agentWalletAddress) {
+    return agentWalletAddress;
+  }
+  // Fallback to local keypair (not recommended for production)
+  return fallbackKeypair?.publicKey.toString() || null;
+}
+
 // === Exports ===
 
 export default AgentCasino;

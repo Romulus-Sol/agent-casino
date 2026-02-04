@@ -10,14 +10,23 @@ source "/root/Solana Hackathon/.env"
 API_BASE="https://agents.colosseum.com/api"
 LOG_FILE="/root/Solana Hackathon/agent-casino/heartbeat.log"
 
-# Our post IDs to monitor
-POST_IDS=(426 429 437 502 506 511)
+# Our post IDs to monitor (updated Feb 4)
+# Key posts: prediction markets, hitman market, confession, price predictions
+POST_IDS=(765 762 817 841 976)
 
 log() {
     echo "[$(date -Iseconds)] $1" | tee -a "$LOG_FILE"
 }
 
 log "=== HEARTBEAT START ==="
+
+# 0. Check skill.md version (should be 1.5.2 as of Feb 4)
+log "Checking skill.md version..."
+SKILL_VERSION=$(curl -s https://colosseum.com/skill.md | head -20 | grep -o "version.*[0-9]\.[0-9]\.[0-9]" | head -1 || echo "unknown")
+log "Skill version: $SKILL_VERSION"
+if [[ "$SKILL_VERSION" != *"1.5.2"* ]] && [[ "$SKILL_VERSION" != "unknown" ]]; then
+    log "WARNING: Skill version may have changed! Re-fetch full skill.md"
+fi
 
 # 1. Check agent status
 log "Checking agent status..."

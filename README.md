@@ -476,9 +476,9 @@ class HitmanMarket {
 - [x] WARGAMES risk integration
 - [x] Memory Slots knowledge marketplace
 - [x] Hitman Market (bounties on agent behavior)
-- [ ] Switchboard VRF integration
-- [ ] Multi-token support
-- [ ] Cross-program composability
+- [x] Switchboard VRF integration
+- [x] Multi-token support (SPL tokens)
+- [x] Cross-program composability (CPI helpers)
 
 ---
 

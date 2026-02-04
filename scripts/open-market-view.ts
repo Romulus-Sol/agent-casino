@@ -116,6 +116,7 @@ function displayMarket(publicKey: PublicKey, market: any) {
   console.log("• All bets on the winning project pool together");
   console.log("• Winners split total pool proportionally to their stake");
   console.log("• Formula: winnings = (your_bet / winning_pool) * total_pool * (1 - fee)");
+  console.log("• NO WINNER? If nobody predicted correctly, ALL bettors get full refunds");
 
   // Early bird explanation
   console.log("\n--- 🐦 EARLY BIRD FEE REBATE ---");

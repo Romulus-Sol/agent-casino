@@ -970,6 +970,11 @@ pub mod agent_casino {
     ///   - Effective fee: 1% * (1 - 1.0) = 0%
     ///   - Your payout: 25 SOL (no fee!)
     ///   - Your profit: 25 - 10 = 15 SOL (150% return)
+    ///
+    /// NO WINNER SCENARIO:
+    /// If winning_pool == 0 (nobody bet on the winning project), all revealed
+    /// bettors can claim a full refund of their original bet. This prevents
+    /// funds from being locked forever when no one predicted correctly.
     pub fn claim_prediction_winnings(ctx: Context<ClaimPredictionWinnings>) -> Result<()> {
         let market = &ctx.accounts.market;
         let bet = &ctx.accounts.bet;
@@ -978,13 +983,36 @@ pub mod agent_casino {
         require!(bet.revealed, CasinoError::BetNotRevealed);
         require!(!bet.claimed, CasinoError::AlreadyClaimed);
 
-        // OPEN MARKET: Compare project slugs (fixed-size arrays)
-        require!(bet.predicted_project == market.winning_project, CasinoError::DidNotWin);
-
-        // Calculate base winnings using pari-mutuel formula (before fee)
-        // winning_pool is provided at resolution time (sum of all bets on winning project)
         let winning_pool = market.winning_pool;
-        require!(winning_pool > 0, CasinoError::NoWinningBets);
+        let market_key = ctx.accounts.market.key();
+        let bettor_key = ctx.accounts.bettor.key();
+        let bet_amount = bet.amount;
+
+        // NO WINNER SCENARIO: If winning_pool == 0, refund all revealed bettors
+        if winning_pool == 0 {
+            // Full refund - no fees charged when nobody wins
+            let refund_amount = bet_amount;
+
+            // Transfer refund to bettor
+            **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
+            **ctx.accounts.bettor.to_account_info().try_borrow_mut_lamports()? += refund_amount;
+
+            // Mark as claimed
+            let bet = &mut ctx.accounts.bet;
+            bet.claimed = true;
+
+            emit!(PredictionNoWinnerRefund {
+                market_id: market_key,
+                bettor: bettor_key,
+                refund_amount,
+            });
+
+            return Ok(());
+        }
+
+        // NORMAL WINNER SCENARIO: Pari-mutuel payout
+        // Compare project slugs (fixed-size arrays)
+        require!(bet.predicted_project == market.winning_project, CasinoError::DidNotWin);
 
         let gross_winnings = (bet.amount as u128)
             .checked_mul(market.total_pool as u128)
@@ -1019,11 +1047,6 @@ pub mod agent_casino {
             .unwrap() as u64;
 
         let net_winnings = gross_winnings.saturating_sub(fee);
-
-        // Capture keys and values before mutable borrows
-        let market_key = ctx.accounts.market.key();
-        let bettor_key = ctx.accounts.bettor.key();
-        let bet_amount = bet.amount;
 
         // Transfer net winnings to bettor
         **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= net_winnings;
@@ -1804,6 +1827,13 @@ pub struct PredictionWinningsClaimed {
     pub winnings: u64,
     pub early_bird_discount_bps: u16,  // Basis points of fee discount (0-100 = 0-1%)
     pub fee_paid: u64,                 // Actual fee paid after early bird discount
+}
+
+#[event]
+pub struct PredictionNoWinnerRefund {
+    pub market_id: Pubkey,
+    pub bettor: Pubkey,
+    pub refund_amount: u64,
 }
 
 #[event]

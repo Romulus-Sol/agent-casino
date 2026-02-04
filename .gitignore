@@ -53,3 +53,6 @@ Cargo.lock
 
 # Demo wallet (do not commit)
 demo/demo-wallet.json
+
+# Prediction market reveal files (contain secret salts)
+reveal-*.json

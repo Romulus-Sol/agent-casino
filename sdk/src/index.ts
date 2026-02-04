@@ -38,6 +38,22 @@ export const PROGRAM_ID = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG
 
 export type CoinChoice = 'heads' | 'tails';
 export type DiceTarget = 1 | 2 | 3 | 4 | 5;
+export type RiskProvider = 'wargames' | 'none';
+
+export interface CasinoConfig {
+  riskProvider?: RiskProvider;
+  maxRiskMultiplier?: number; // Cap for risk-adjusted bets (default: 2.0)
+  minRiskMultiplier?: number; // Floor for risk-adjusted bets (default: 0.3)
+}
+
+export interface BettingContext {
+  betMultiplier: number;
+  riskScore: number;
+  recommendation: string;
+  warnings: string[];
+  memecoinMania: string;
+  timestamp: number;
+}
 
 export interface GameResult {
   txSignature: string;
@@ -102,12 +118,27 @@ export class AgentCasino {
   private provider: AnchorProvider;
   private housePda: PublicKey;
   private vaultPda: PublicKey;
+  private config: CasinoConfig;
+  private cachedBettingContext: BettingContext | null = null;
+  private contextCacheTime: number = 0;
+  private readonly CONTEXT_CACHE_TTL = 60000; // 1 minute cache
 
   constructor(
     connection: Connection,
     wallet: Wallet | Keypair,
-    programId: PublicKey = PROGRAM_ID
+    programIdOrConfig?: PublicKey | CasinoConfig,
+    config?: CasinoConfig
   ) {
+    // Handle flexible constructor signatures
+    let programId = PROGRAM_ID;
+    if (programIdOrConfig instanceof PublicKey) {
+      programId = programIdOrConfig;
+      this.config = config || {};
+    } else if (programIdOrConfig) {
+      this.config = programIdOrConfig;
+    } else {
+      this.config = {};
+    }
     this.connection = connection;
     
     // Handle both Wallet and Keypair
@@ -418,6 +449,112 @@ export class AgentCasino {
 
     const tx = new Transaction().add(ix);
     return await this.provider.sendAndConfirm(tx);
+  }
+
+  // === Risk Management (WARGAMES Integration) ===
+
+  /**
+   * Get current betting context from WARGAMES API
+   * Returns risk-adjusted bet multiplier based on macro conditions
+   */
+  async getBettingContext(): Promise<BettingContext> {
+    // Return cached context if fresh
+    if (this.cachedBettingContext && Date.now() - this.contextCacheTime < this.CONTEXT_CACHE_TTL) {
+      return this.cachedBettingContext;
+    }
+
+    if (this.config.riskProvider !== 'wargames') {
+      return {
+        betMultiplier: 1.0,
+        riskScore: 50,
+        recommendation: 'Risk provider not configured',
+        warnings: [],
+        memecoinMania: 'unknown',
+        timestamp: Date.now(),
+      };
+    }
+
+    try {
+      const response = await fetch('https://wargames-api.vercel.app/live/betting-context');
+      const data = await response.json();
+
+      // Apply multiplier caps from config
+      let multiplier = data.bet_multiplier || 1.0;
+      const maxMult = this.config.maxRiskMultiplier || 2.0;
+      const minMult = this.config.minRiskMultiplier || 0.3;
+      multiplier = Math.max(minMult, Math.min(maxMult, multiplier));
+
+      this.cachedBettingContext = {
+        betMultiplier: multiplier,
+        riskScore: data.risk_score || 50,
+        recommendation: data.recommendation || 'No recommendation',
+        warnings: data.signals?.warnings || [],
+        memecoinMania: data.signals?.memecoin_mania || 'unknown',
+        timestamp: Date.now(),
+      };
+      this.contextCacheTime = Date.now();
+
+      return this.cachedBettingContext;
+    } catch (e) {
+      // Fallback to neutral on API failure
+      return {
+        betMultiplier: 1.0,
+        riskScore: 50,
+        recommendation: 'WARGAMES API unavailable - using neutral settings',
+        warnings: ['api_unavailable'],
+        memecoinMania: 'unknown',
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  /**
+   * Get risk-adjusted bet amount
+   * Scales your base bet based on macro conditions
+   */
+  async getRiskAdjustedBet(baseBetSol: number): Promise<{ adjustedBet: number; context: BettingContext }> {
+    const context = await this.getBettingContext();
+    return {
+      adjustedBet: baseBetSol * context.betMultiplier,
+      context,
+    };
+  }
+
+  /**
+   * Coin flip with automatic risk adjustment
+   * Bet size scales based on macro conditions when riskProvider is configured
+   */
+  async smartCoinFlip(baseBetSol: number, choice: CoinChoice): Promise<GameResult & { riskContext?: BettingContext }> {
+    if (this.config.riskProvider === 'wargames') {
+      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const result = await this.coinFlip(adjustedBet, choice);
+      return { ...result, riskContext: context };
+    }
+    return this.coinFlip(baseBetSol, choice);
+  }
+
+  /**
+   * Dice roll with automatic risk adjustment
+   */
+  async smartDiceRoll(baseBetSol: number, target: DiceTarget): Promise<GameResult & { riskContext?: BettingContext }> {
+    if (this.config.riskProvider === 'wargames') {
+      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const result = await this.diceRoll(adjustedBet, target);
+      return { ...result, riskContext: context };
+    }
+    return this.diceRoll(baseBetSol, target);
+  }
+
+  /**
+   * Limbo with automatic risk adjustment
+   */
+  async smartLimbo(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
+    if (this.config.riskProvider === 'wargames') {
+      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const result = await this.limbo(adjustedBet, targetMultiplier);
+      return { ...result, riskContext: context };
+    }
+    return this.limbo(baseBetSol, targetMultiplier);
   }
 
   // === Verification Methods ===

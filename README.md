@@ -101,10 +101,29 @@ await casino.addLiquidity(amount);
 await casino.tokenCoinFlip(mintAddress, amount, 'heads');
 await casino.getTokenVaultStats(mintAddress);
 
+// Jupiter auto-swap: pay with ANY token, we swap to SOL and play
+await casino.swapAndCoinFlip('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 1_000_000, 'heads'); // 1 USDC
+
 // Risk-adjusted betting (WARGAMES integration)
 const casino2 = new AgentCasino(connection, wallet, { riskProvider: 'wargames' });
 const ctx = await casino2.getBettingContext();   // fear/greed, Solana health, narratives
 await casino2.smartCoinFlip(0.01, 'heads');      // auto-scales bet based on macro conditions
+```
+
+### x402 HTTP API
+
+Play games via HTTP with USDC payments — no SDK import needed:
+
+```bash
+# Start the server
+npm run start:server
+
+# Free endpoints
+curl http://localhost:3402/v1/stats
+
+# Paid endpoints return 402 with USDC payment requirements
+curl http://localhost:3402/v1/games/coinflip?choice=heads
+# → 402: pay 0.01 USDC, then retry with X-Payment header
 ```
 
 ## Example Agents

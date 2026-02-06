@@ -4,13 +4,15 @@
   "description": "A headless casino protocol for AI agents on Solana",
   "private": true,
   "workspaces": [
-    "sdk"
+    "sdk",
+    "server"
   ],
   "scripts": {
     "build": "anchor build && cd sdk && npm run build",
     "test": "anchor test",
     "deploy:devnet": "anchor deploy --provider.cluster devnet",
     "deploy:mainnet": "anchor deploy --provider.cluster mainnet",
+    "start:server": "cd server && npx ts-node index.ts",
     "example:degen": "npx ts-node examples/degen-agent.ts",
     "example:analyst": "npx ts-node examples/analyst-agent.ts",
     "example:house": "npx ts-node examples/house-agent.ts"

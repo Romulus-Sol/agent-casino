@@ -31,6 +31,7 @@ import {
 } from '@solana/web3.js';
 import { Program, AnchorProvider, BN, Wallet } from '@coral-xyz/anchor';
 import { randomBytes, createHash } from 'crypto';
+import { jupiterSwapToSol, JupiterSwapResult } from './jupiter';
 
 // Program ID - update after deployment
 export const PROGRAM_ID = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV');
@@ -150,6 +151,10 @@ export interface TokenGameResult {
   serverSeed: string;
   clientSeed: string;
   slot: number;
+}
+
+export interface SwapAndPlayResult extends GameResult {
+  swap: JupiterSwapResult;
 }
 
 // Memory Slots types
@@ -800,6 +805,60 @@ export class AgentCasino {
       return { ...result, riskContext: context };
     }
     return this.crash(baseBetSol, targetMultiplier);
+  }
+
+  // === Jupiter Auto-Swap Methods ===
+
+  /**
+   * Swap any SPL token to SOL via Jupiter, then play coin flip.
+   * On devnet, uses mock swap (Jupiter only supports mainnet).
+   * @param inputMint - SPL token mint address (e.g., USDC)
+   * @param tokenAmount - Amount in token base units (e.g., 1000000 = 1 USDC)
+   * @param choice - 'heads' or 'tails'
+   */
+  async swapAndCoinFlip(inputMint: string, tokenAmount: number, choice: CoinChoice): Promise<SwapAndPlayResult> {
+    const swap = await this.jupiterSwap(inputMint, tokenAmount);
+    const result = await this.coinFlip(swap.solAmount, choice);
+    return { ...result, swap };
+  }
+
+  /**
+   * Swap any SPL token to SOL via Jupiter, then play dice roll.
+   */
+  async swapAndDiceRoll(inputMint: string, tokenAmount: number, target: DiceTarget): Promise<SwapAndPlayResult> {
+    const swap = await this.jupiterSwap(inputMint, tokenAmount);
+    const result = await this.diceRoll(swap.solAmount, target);
+    return { ...result, swap };
+  }
+
+  /**
+   * Swap any SPL token to SOL via Jupiter, then play limbo.
+   */
+  async swapAndLimbo(inputMint: string, tokenAmount: number, targetMultiplier: number): Promise<SwapAndPlayResult> {
+    const swap = await this.jupiterSwap(inputMint, tokenAmount);
+    const result = await this.limbo(swap.solAmount, targetMultiplier);
+    return { ...result, swap };
+  }
+
+  /**
+   * Swap any SPL token to SOL via Jupiter, then play crash.
+   */
+  async swapAndCrash(inputMint: string, tokenAmount: number, cashoutMultiplier: number): Promise<SwapAndPlayResult> {
+    const swap = await this.jupiterSwap(inputMint, tokenAmount);
+    const result = await this.crash(swap.solAmount, cashoutMultiplier);
+    return { ...result, swap };
+  }
+
+  private async jupiterSwap(inputMint: string, tokenAmount: number): Promise<JupiterSwapResult> {
+    return jupiterSwapToSol(
+      inputMint,
+      tokenAmount,
+      this.wallet.publicKey.toString(),
+      async (tx: VersionedTransaction) => {
+        return await this.wallet.signTransaction(tx) as VersionedTransaction;
+      },
+      this.connection,
+    );
   }
 
   // === Verification Methods ===
@@ -1834,6 +1893,10 @@ export function getRecommendedWalletAddress(fallbackKeypair?: Keypair): string |
   // Fallback to local keypair (not recommended for production)
   return fallbackKeypair?.publicKey.toString() || null;
 }
+
+// === Jupiter Exports ===
+
+export { jupiterSwapToSol, JupiterSwapResult } from './jupiter';
 
 // === Exports ===
 

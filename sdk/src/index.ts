@@ -31,6 +31,8 @@ import {
 } from '@solana/web3.js';
 import { Program, AnchorProvider, BN, Wallet } from '@coral-xyz/anchor';
 import { randomBytes, createHash } from 'crypto';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
 import { jupiterSwapToSol, JupiterSwapResult } from './jupiter';
 
 // Program ID - update after deployment
@@ -214,6 +216,7 @@ export class AgentCasino {
   private vaultPda: PublicKey;
   private memoryPoolPda: PublicKey;
   private config: CasinoConfig;
+  private program: Program | null = null;
   private cachedBettingContext: BettingContext | null = null;
   private contextCacheTime: number = 0;
   private readonly CONTEXT_CACHE_TTL = 60000; // 1 minute cache
@@ -260,6 +263,38 @@ export class AgentCasino {
       [Buffer.from('memory_pool')],
       programId
     );
+  }
+
+  /**
+   * Lazily load the Anchor Program instance from the IDL.
+   */
+  private async loadProgram(): Promise<void> {
+    if (this.program) return;
+
+    // Try common IDL locations relative to the project root
+    const candidates = [
+      resolve(process.cwd(), 'target/idl/agent_casino.json'),
+      resolve(dirname(__dirname), '..', 'target/idl/agent_casino.json'),
+      resolve(dirname(__dirname), 'target/idl/agent_casino.json'),
+    ];
+
+    let idl: any = null;
+    for (const candidate of candidates) {
+      try {
+        idl = JSON.parse(readFileSync(candidate, 'utf-8'));
+        break;
+      } catch {
+        // try next
+      }
+    }
+
+    if (!idl) {
+      throw new Error(
+        'Could not find agent_casino IDL. Ensure target/idl/agent_casino.json exists (run `anchor build`).'
+      );
+    }
+
+    this.program = new Program(idl, this.provider);
   }
 
   // === Game Methods ===
@@ -1822,10 +1857,15 @@ export class AgentCasino {
       crash: Buffer.from([0x70, 0xba, 0x37, 0x35, 0x24, 0x26, 0x2b, 0x6e]),
     };
 
+    // Limbo/crash take u16 multiplier; coinFlip/diceRoll take u8 choice
+    const choiceBuffer = (method === 'limbo' || method === 'crash')
+      ? Buffer.from(new Uint16Array([choice]).buffer)  // u16 little-endian (2 bytes)
+      : Buffer.from([choice]);                          // u8 (1 byte)
+
     const instructionData = Buffer.concat([
       discriminators[method],
       new BN(amount).toArrayLike(Buffer, 'le', 8),
-      Buffer.from([choice]),
+      choiceBuffer,
       clientSeed,
     ]);
 

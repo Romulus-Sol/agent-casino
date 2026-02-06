@@ -318,9 +318,88 @@ console.log(`Base: 0.1 SOL -> Adjusted: ${adjustedBet} SOL`);
 ```
 
 **Risk-aware game methods:**
-- `smartCoinFlip(baseBet, choice)` - Auto-scales bet
-- `smartDiceRoll(baseBet, target)` - Auto-scales bet
-- `smartLimbo(baseBet, multiplier)` - Auto-scales bet
+- `smartCoinFlip(baseBet, choice)` - Auto-scales bet (sentiment-driven)
+- `smartDiceRoll(baseBet, target)` - Auto-scales bet (+ volatility)
+- `smartLimbo(baseBet, multiplier)` - Auto-scales bet (+ volatility + liquidity)
+- `smartCrash(baseBet, multiplier)` - Auto-scales bet (+ volatility + liquidity + flash crash)
+
+### Decomposed Risk Factors
+
+The WARGAMES oracle provides granular risk data via `/oracle/risk/decomposed`:
+
+| Factor | Effect |
+|--------|--------|
+| Fear & Greed Index | Base multiplier (0.3x - 2.0x) |
+| Volatility regime (percentile) | Scales down dice, limbo, crash when >50th |
+| Liquidity stress (spread BPS + slippage) | Scales down limbo, crash when stressed |
+| Flash crash probability | Scales down crash only when >5% |
+| Solana network health | Hard floor (min multiplier) if unhealthy |
+| Funding rates (SOL/BTC/ETH) | Signal for context |
+
+---
+
+## Jupiter Auto-Swap
+
+Swap any SPL token to SOL via Jupiter Ultra API, then play — in one function call.
+
+```typescript
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+await casino.swapAndCoinFlip(USDC, 1_000_000, 'heads');  // 1 USDC → SOL → coin flip
+await casino.swapAndDiceRoll(USDC, 1_000_000, 3);
+await casino.swapAndLimbo(USDC, 1_000_000, 2.5);
+await casino.swapAndCrash(USDC, 1_000_000, 1.5);
+```
+
+**How it works:**
+1. Calls Jupiter Ultra API (`/order`) to get a swap transaction
+2. Validates the transaction: simulates on-chain, checks all program IDs against an allowlist
+3. Signs and executes the swap (`/execute`)
+4. Validates slippage (rejects zero output or >10% deviation from quote)
+5. Plays the game with the received SOL
+
+On devnet, uses mock mode (configurable rate via `JUPITER_MOCK_RATE` env var) since Jupiter only supports mainnet. Mock mode logs explicit warnings.
+
+```bash
+npx ts-node scripts/swap-and-play.ts coinflip EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v 1000000 heads
+```
+
+---
+
+## x402 HTTP Payment Gateway
+
+Exposes all casino games as HTTP endpoints gated by the x402 payment protocol. Any agent that speaks HTTP can play — no SDK, no Solana knowledge required.
+
+```bash
+npm run start:server  # Starts on port 3402
+```
+
+### Endpoints
+
+| Endpoint | Price | Parameters |
+|----------|-------|------------|
+| `GET /v1/health` | Free | — |
+| `GET /v1/stats` | Free | — |
+| `GET /v1/games/coinflip` | 0.01 USDC | `?choice=heads\|tails` |
+| `GET /v1/games/diceroll` | 0.01 USDC | `?target=1-5` |
+| `GET /v1/games/limbo` | 0.01 USDC | `?multiplier=1.01-100` |
+| `GET /v1/games/crash` | 0.01 USDC | `?multiplier=1.01-100` |
+
+### Flow
+
+1. Agent sends `GET /v1/games/coinflip?choice=heads`
+2. Server returns `402` with USDC payment requirements (amount, mint, recipient)
+3. Agent creates SPL Token transfer tx, signs it, base64-encodes it
+4. Agent retries with `X-Payment` header containing the signed tx
+5. Server validates the USDC transfer, submits on-chain, confirms, then executes the game
+
+### Security
+
+- **Payment validation**: Deserializes transaction and inspects SPL Token instructions (Transfer type 3 / TransferChecked type 12) to verify amount, mint, and recipient
+- **Replay protection**: Signature cache (10k entries, FIFO eviction)
+- **Rate limiting**: 60/min for free endpoints, 10/min for paid
+- **Error sanitization**: Generic error messages to clients, detailed errors logged server-side
+- **Payer extraction**: Fee payer read from `tx.message.staticAccountKeys[0]`, not from untrusted client data
 
 ---
 
@@ -423,6 +502,12 @@ class AgentCasino {
   tokenCoinFlip(mint, amount, choice): Promise<TokenGameResult>
   getTokenVaultStats(mint): Promise<TokenVaultStats>
 
+  // Jupiter Auto-Swap (any token → SOL → game)
+  swapAndCoinFlip(inputMint, tokenAmount, choice): Promise<SwapAndPlayResult>
+  swapAndDiceRoll(inputMint, tokenAmount, target): Promise<SwapAndPlayResult>
+  swapAndLimbo(inputMint, tokenAmount, multiplier): Promise<SwapAndPlayResult>
+  swapAndCrash(inputMint, tokenAmount, multiplier): Promise<SwapAndPlayResult>
+
   // Stats & Liquidity
   getHouseStats(): Promise<HouseStats>
   getMyStats(): Promise<AgentStats>
@@ -470,3 +555,11 @@ class HitmanMarket {
 - [x] Hitman Market (bounties on agent behavior)
 - [x] Price Predictions (Pyth oracle)
 - [x] AgentWallet integration
+- [x] SPL token vaults (multi-token betting)
+- [x] Crash game (exponential distribution)
+- [x] WARGAMES decomposed risk (per-game multipliers)
+- [x] Jupiter Ultra API auto-swap (any token → SOL → game)
+- [x] x402 HTTP payment gateway (USDC-gated game access)
+- [x] Security audit #1: 26 vulnerabilities fixed (core program)
+- [x] Security audit #2: 16 vulnerabilities fixed (Jupiter + x402)
+- [x] Comprehensive test suite (34 tests)

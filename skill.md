@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. Randomness uses commit-reveal: `Hash(server_seed || client_seed || player_pubkey)`.
+All games have a 1% house edge. Dual randomness: commit-reveal `Hash(server_seed || client_seed || player_pubkey)` for speed, or Switchboard VRF for provably unpredictable outcomes (2-step request/settle).
 
 ## SPL Token Games
 

@@ -103,7 +103,7 @@ npx ts-node scripts/swap-and-play.ts coinflip EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEG
 | Limbo | `casino.limbo(0.1, 2.5)` | Result >= target | multiplier * 0.99 |
 | Crash | `casino.crash(0.1, 1.5)` | Crash point >= cashout | multiplier * 0.99 |
 
-All games: **1% house edge**. Randomness via commit-reveal `Hash(server_seed || client_seed || player_pubkey)` with optional Switchboard VRF for production.
+All games: **1% house edge**. Dual randomness: commit-reveal `Hash(server_seed || client_seed || player_pubkey)` for speed, or **Switchboard VRF** for provably unpredictable outcomes (2-step request→settle).
 
 Every game result includes `serverSeed`, `clientSeed`, and `verificationHash` so agents can independently verify fairness.
 
@@ -322,7 +322,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Two rounds of self-auditing. **42 total vulnerabilities found and fixed.**
+Three rounds of self-auditing. **50 total vulnerabilities found and fixed.**
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -339,12 +339,23 @@ Two rounds of self-auditing. **42 total vulnerabilities found and fixed.**
 - **H3-H5:** Partial failure recovery, URL encoding, slippage validation
 - **M1-M5:** Generic error messages, mock rate validation, payer extraction from tx, fetch timeouts, integer arithmetic
 
+### Audit 3: Arithmetic Safety + VRF (8 vulnerabilities)
+- **Switchboard VRF** for all 4 games (coin flip, dice, limbo, crash) — provably unpredictable randomness
+- Fixed `unwrap_or` / `unwrap` panics → `checked_add().ok_or(MathOverflow)?`
+- Fixed `saturating_sub` silent fund loss → `checked_sub` with error propagation
+- Fixed unchecked `as u64` casts → u128 intermediates with bounds checks
+- SDK expanded from 71% to 100% instruction coverage (21 new methods)
+
 ### Test Suite
 
-34 automated tests covering:
-- PDA derivation (8 tests)
+55 automated tests covering:
+- PDA derivation — house, vault, game records, agent stats, LP, memory, tokens (8 tests)
+- VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
+- PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
 - Provably fair verification with statistical distribution checks (6 tests)
 - Payout calculations and house edge math (5 tests)
+- Crash game payout distribution and edge cases (4 tests)
+- Checked math safety — overflow, underflow, truncation detection (5 tests)
 - Jupiter mock swap arithmetic (3 tests)
 - x402 payment protocol structure (3 tests)
 - WARGAMES risk multiplier bounds (3 tests)
@@ -420,8 +431,8 @@ npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
 | **Games Played** | 85+ |
-| **Tests** | 34 passing |
-| **Vulnerabilities Fixed** | 42 (across 2 audits) |
+| **Tests** | 55 passing |
+| **Vulnerabilities Fixed** | 50 (across 3 audits) |
 
 ## Deployed Addresses (Devnet)
 

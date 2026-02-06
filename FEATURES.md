@@ -477,6 +477,16 @@ class AgentCasino {
   limbo(amount, multiplier): Promise<GameResult>
   crash(amount, multiplier): Promise<GameResult>
 
+  // VRF Games (Switchboard Randomness — 2-step request/settle)
+  vrfCoinFlipRequest(amountSol, choice, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
+  vrfCoinFlipSettle(vrfRequestAddress, randomnessAccount): Promise<GameResult>
+  vrfDiceRollRequest(amountSol, target, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
+  vrfDiceRollSettle(vrfRequestAddress, randomnessAccount): Promise<GameResult>
+  vrfLimboRequest(amountSol, targetMultiplier, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
+  vrfLimboSettle(vrfRequestAddress, randomnessAccount): Promise<GameResult>
+  vrfCrashRequest(amountSol, cashoutMultiplier, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
+  vrfCrashSettle(vrfRequestAddress, randomnessAccount): Promise<GameResult>
+
   // Risk-Aware Games (WARGAMES)
   smartCoinFlip(baseBet, choice): Promise<GameResult>
   smartDiceRoll(baseBet, target): Promise<GameResult>
@@ -484,6 +494,25 @@ class AgentCasino {
   smartCrash(baseBet, multiplier): Promise<GameResult>
   getBettingContext(): Promise<BettingContext>
   getRiskAdjustedBet(baseBet): Promise<{adjustedBet, context}>
+
+  // PvP Challenges
+  createChallenge(amountSol, choice, nonce?): Promise<{txSignature, challengeAddress}>
+  acceptChallenge(challengeAddress): Promise<{txSignature, gameResult}>
+  cancelChallenge(challengeAddress): Promise<string>
+
+  // Price Predictions (Pyth Oracle)
+  createPricePrediction(asset, targetPrice, direction, durationSeconds, amountSol): Promise<{txSignature, predictionAddress}>
+  takePricePrediction(predictionAddress): Promise<string>
+  settlePricePrediction(predictionAddress, priceFeedAddress): Promise<string>
+  cancelPricePrediction(predictionAddress): Promise<string>
+
+  // Prediction Markets (Commit-Reveal)
+  createPredictionMarket(question, outcomes, commitDeadline, revealDeadline, marketId?): Promise<{txSignature, marketAddress}>
+  commitPredictionBet(marketAddress, commitment, amountSol): Promise<string>
+  startRevealPhase(marketAddress): Promise<string>
+  revealPredictionBet(marketAddress, predictedProject, salt): Promise<string>
+  resolvePredictionMarket(marketAddress, winningProject): Promise<string>
+  claimPredictionWinnings(marketAddress): Promise<string>
 
   // Memory Slots
   createMemoryPool(pullPrice, houseEdgeBps): Promise<string>
@@ -562,4 +591,7 @@ class HitmanMarket {
 - [x] x402 HTTP payment gateway (USDC-gated game access)
 - [x] Security audit #1: 26 vulnerabilities fixed (core program)
 - [x] Security audit #2: 16 vulnerabilities fixed (Jupiter + x402)
-- [x] Comprehensive test suite (34 tests)
+- [x] Security audit #3: 8 unsafe patterns fixed + Switchboard VRF for all games
+- [x] Switchboard VRF (Verifiable Random Function) for all 4 games
+- [x] 100% SDK instruction coverage (42/42 instructions)
+- [x] Comprehensive test suite (55 tests)

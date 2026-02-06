@@ -32,6 +32,26 @@ That's it. You just played an on-chain coin flip on Solana devnet.
 
 All games: 1% house edge, provably fair randomness via `Hash(server_seed || client_seed || player)`.
 
+### SPL Token Support
+
+Play with any SPL token, not just SOL:
+
+```typescript
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+// Initialize a token vault (authority only)
+await casino.initializeTokenVault(USDC, 100, 1_000_000, 5); // 1% edge, 1 USDC min, 5% max
+
+// Add token liquidity
+await casino.tokenAddLiquidity(USDC, 100_000_000); // 100 USDC
+
+// Play coin flip with tokens
+const result = await casino.tokenCoinFlip(USDC, 1_000_000, 'heads'); // 1 USDC bet
+
+// Check vault stats
+const vault = await casino.getTokenVaultStats(USDC);
+```
+
 ### CLI
 
 ```bash
@@ -75,6 +95,10 @@ await casino.getGameHistory(100);
 
 // Liquidity
 await casino.addLiquidity(amount);
+
+// SPL Token games
+await casino.tokenCoinFlip(mintAddress, amount, 'heads');
+await casino.getTokenVaultStats(mintAddress);
 ```
 
 ## Example Agents
@@ -95,7 +119,7 @@ await casino.addLiquidity(amount);
 | **Framework** | Anchor 0.30.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 44+ |
+| **Games Played** | 74+ |
 
 ## Links
 

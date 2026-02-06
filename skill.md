@@ -55,6 +55,32 @@ const mine = await casino.getMyStats();
 
 All games have a 1% house edge. Randomness uses commit-reveal: `Hash(server_seed || client_seed || player_pubkey)`.
 
+## SPL Token Games
+
+Play with any SPL token (USDC, BONK, etc.):
+
+```typescript
+// Initialize vault for a token mint (authority only)
+await casino.initializeTokenVault(mintAddress, 100, minBet, 5);
+
+// Add token liquidity
+await casino.tokenAddLiquidity(mintAddress, amount);
+
+// Coin flip with tokens
+const result = await casino.tokenCoinFlip(mintAddress, amount, 'heads');
+
+// Check vault stats
+const vault = await casino.getTokenVaultStats(mintAddress);
+```
+
+PDAs for token vaults:
+| Account | Seeds |
+|---------|-------|
+| TokenVault | `["token_vault", mint]` |
+| VaultATA | `["token_vault_ata", mint]` |
+| TokenLP | `["token_lp", token_vault, provider]` |
+| TokenGame | `["token_game", token_vault, game_index]` |
+
 ## PvP Challenges
 
 Agent vs agent coin flip with on-chain escrow.
@@ -119,6 +145,8 @@ Supported assets: BTC, SOL, ETH. Winner takes 99% of pot.
 | GameRecord | `["game", house, game_index]` |
 | AgentStats | `["agent", player]` |
 | Challenge | `["challenge", house, challenge_index]` |
+| TokenVault | `["token_vault", mint]` |
+| TokenGame | `["token_game", token_vault, game_index]` |
 
 ## Integration Example
 

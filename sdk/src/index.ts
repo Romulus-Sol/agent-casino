@@ -111,6 +111,33 @@ export interface GameRecord {
   slot: number;
 }
 
+// SPL Token types
+
+export interface TokenVaultStats {
+  authority: string;
+  mint: string;
+  vaultAta: string;
+  pool: number; // in token units
+  houseEdgeBps: number;
+  minBet: number; // in token units
+  maxBetPercent: number;
+  totalGames: number;
+  totalVolume: number;
+  totalPayout: number;
+}
+
+export interface TokenGameResult {
+  txSignature: string;
+  won: boolean;
+  payout: number; // in token units
+  result: number;
+  choice: number;
+  mint: string;
+  serverSeed: string;
+  clientSeed: string;
+  slot: number;
+}
+
 // Memory Slots types
 
 export type MemoryCategory = 'Strategy' | 'Technical' | 'Alpha' | 'Random';
@@ -680,6 +707,271 @@ export class AgentCasino {
     const computedResult = hash[0] % 2; // For coin flip
 
     return computedResult === expectedResult;
+  }
+
+  // === SPL Token Methods ===
+
+  private static readonly TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+  /**
+   * Derive token vault PDAs for a given mint
+   */
+  private deriveTokenVaultPdas(mint: PublicKey) {
+    const [tokenVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_vault'), mint.toBuffer()],
+      PROGRAM_ID
+    );
+    const [vaultAtaPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_vault_ata'), mint.toBuffer()],
+      PROGRAM_ID
+    );
+    return { tokenVaultPda, vaultAtaPda };
+  }
+
+  /**
+   * Initialize a token vault for SPL token betting
+   * @param mint SPL token mint address
+   * @param houseEdgeBps House edge in basis points (e.g., 100 = 1%)
+   * @param minBet Minimum bet in token base units
+   * @param maxBetPercent Max bet as percentage of pool (1-10)
+   */
+  async initializeTokenVault(
+    mint: string | PublicKey,
+    houseEdgeBps: number,
+    minBet: number,
+    maxBetPercent: number
+  ): Promise<string> {
+    const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
+    const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
+
+    const discriminator = Buffer.from([0x40, 0xca, 0x71, 0xcd, 0x16, 0xd2, 0xb2, 0xe1]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      Buffer.from(new Uint16Array([houseEdgeBps]).buffer),
+      new BN(minBet).toArrayLike(Buffer, 'le', 8),
+      Buffer.from([maxBetPercent]),
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: tokenVaultPda, isSigner: false, isWritable: true },
+        { pubkey: mintPubkey, isSigner: false, isWritable: false },
+        { pubkey: vaultAtaPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: AgentCasino.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Add liquidity to a token vault
+   * @param mint SPL token mint address
+   * @param amount Amount of tokens to deposit (in base units)
+   * @param providerAta Provider's associated token account (will be derived if not provided)
+   */
+  async tokenAddLiquidity(
+    mint: string | PublicKey,
+    amount: number,
+    providerAta?: string | PublicKey
+  ): Promise<string> {
+    const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
+    const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
+
+    const [lpPositionPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_lp'), tokenVaultPda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    // If no provider ATA given, derive the standard ATA
+    let providerAtaPubkey: PublicKey;
+    if (providerAta) {
+      providerAtaPubkey = typeof providerAta === 'string' ? new PublicKey(providerAta) : providerAta;
+    } else {
+      const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+      providerAtaPubkey = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
+    }
+
+    const discriminator = Buffer.from([0x51, 0x83, 0x1d, 0xe8, 0xba, 0xc9, 0xac, 0xcc]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      new BN(amount).toArrayLike(Buffer, 'le', 8),
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: tokenVaultPda, isSigner: false, isWritable: true },
+        { pubkey: mintPubkey, isSigner: false, isWritable: false },
+        { pubkey: vaultAtaPda, isSigner: false, isWritable: true },
+        { pubkey: lpPositionPda, isSigner: false, isWritable: true },
+        { pubkey: providerAtaPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: AgentCasino.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Play a coin flip with SPL tokens
+   * @param mint SPL token mint address
+   * @param amount Bet amount in token base units
+   * @param choice 'heads' or 'tails'
+   * @param playerAta Player's associated token account (will be derived if not provided)
+   */
+  async tokenCoinFlip(
+    mint: string | PublicKey,
+    amount: number,
+    choice: CoinChoice,
+    playerAta?: string | PublicKey
+  ): Promise<TokenGameResult> {
+    const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
+    const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
+    const choiceNum = choice === 'heads' ? 0 : 1;
+    const clientSeed = this.generateClientSeed();
+
+    // Fetch vault to get game index
+    const vaultAccount = await this.connection.getAccountInfo(tokenVaultPda);
+    if (!vaultAccount) throw new Error('Token vault not found for this mint');
+    const totalGames = new BN(vaultAccount.data.slice(8 + 32 + 32 + 32 + 8 + 2 + 8 + 1, 8 + 32 + 32 + 32 + 8 + 2 + 8 + 1 + 8), 'le');
+
+    const gameIndexBuffer = totalGames.toArrayLike(Buffer, 'le', 8);
+    const [gameRecordPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_game'), tokenVaultPda.toBuffer(), gameIndexBuffer],
+      PROGRAM_ID
+    );
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    // Derive player ATA if not provided
+    let playerAtaPubkey: PublicKey;
+    if (playerAta) {
+      playerAtaPubkey = typeof playerAta === 'string' ? new PublicKey(playerAta) : playerAta;
+    } else {
+      const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+      playerAtaPubkey = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
+    }
+
+    const discriminator = Buffer.from([0x05, 0x5b, 0x10, 0x19, 0x47, 0x52, 0x71, 0xef]);
+    const instructionData = Buffer.concat([
+      discriminator,
+      new BN(amount).toArrayLike(Buffer, 'le', 8),
+      Buffer.from([choiceNum]),
+      clientSeed,
+    ]);
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: tokenVaultPda, isSigner: false, isWritable: true },
+        { pubkey: mintPubkey, isSigner: false, isWritable: false },
+        { pubkey: vaultAtaPda, isSigner: false, isWritable: true },
+        { pubkey: gameRecordPda, isSigner: false, isWritable: true },
+        { pubkey: agentStatsPda, isSigner: false, isWritable: true },
+        { pubkey: playerAtaPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: AgentCasino.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: instructionData,
+    };
+
+    const tx = new Transaction().add(ix);
+    const txSignature = await this.provider.sendAndConfirm(tx);
+
+    // Parse game record
+    const gameAccount = await this.connection.getAccountInfo(gameRecordPda);
+    if (gameAccount) {
+      const data = gameAccount.data;
+      let offset = 8; // skip discriminator
+      offset += 32; // player
+      offset += 32; // mint
+      const gameType = data[offset]; offset += 1;
+      const betAmount = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+      const resultChoice = data[offset]; offset += 1;
+      const result = data[offset]; offset += 1;
+      const payout = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+      const serverSeed = data.slice(offset, offset + 32); offset += 32;
+      const parsedClientSeed = data.slice(offset, offset + 32); offset += 32;
+      const timestamp = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+      const slot = new BN(data.slice(offset, offset + 8), 'le');
+
+      return {
+        txSignature,
+        won: payout.toNumber() > 0,
+        payout: payout.toNumber(),
+        result,
+        choice: choiceNum,
+        mint: mintPubkey.toString(),
+        serverSeed: Buffer.from(serverSeed).toString('hex'),
+        clientSeed: Buffer.from(parsedClientSeed).toString('hex'),
+        slot: slot.toNumber(),
+      };
+    }
+
+    return {
+      txSignature,
+      won: false,
+      payout: 0,
+      result: -1,
+      choice: choiceNum,
+      mint: mintPubkey.toString(),
+      serverSeed: '',
+      clientSeed: clientSeed.toString('hex'),
+      slot: 0,
+    };
+  }
+
+  /**
+   * Get token vault stats for a specific mint
+   * @param mint SPL token mint address
+   */
+  async getTokenVaultStats(mint: string | PublicKey): Promise<TokenVaultStats> {
+    const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
+    const { tokenVaultPda } = this.deriveTokenVaultPdas(mintPubkey);
+
+    const accountInfo = await this.connection.getAccountInfo(tokenVaultPda);
+    if (!accountInfo) throw new Error('Token vault not found for this mint');
+
+    const data = accountInfo.data;
+    let offset = 8; // skip discriminator
+    const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    const mintAddr = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    const vaultAta = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    const pool = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+    const houseEdgeBps = data.readUInt16LE(offset); offset += 2;
+    const minBet = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+    const maxBetPercent = data[offset]; offset += 1;
+    const totalGames = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+    const totalVolume = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
+    const totalPayout = new BN(data.slice(offset, offset + 8), 'le');
+
+    return {
+      authority: authority.toString(),
+      mint: mintAddr.toString(),
+      vaultAta: vaultAta.toString(),
+      pool: pool.toNumber(),
+      houseEdgeBps,
+      minBet: minBet.toNumber(),
+      maxBetPercent,
+      totalGames: totalGames.toNumber(),
+      totalVolume: totalVolume.toNumber(),
+      totalPayout: totalPayout.toNumber(),
+    };
   }
 
   // === Memory Slots Methods ===

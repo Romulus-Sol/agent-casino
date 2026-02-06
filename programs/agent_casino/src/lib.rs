@@ -68,10 +68,10 @@ pub mod agent_casino {
             lp_position.house = ctx.accounts.house.key();
             lp_position.bump = ctx.bumps.lp_position;
         }
-        lp_position.deposited = lp_position.deposited.checked_add(amount).unwrap();
+        lp_position.deposited = lp_position.deposited.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         let house = &mut ctx.accounts.house;
-        house.pool = house.pool.checked_add(amount).unwrap();
+        house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(LiquidityAdded {
             provider: ctx.accounts.provider.key(),
@@ -133,12 +133,12 @@ pub mod agent_casino {
         // Update house stats
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            house.total_payout = house.total_payout.checked_add(payout).unwrap();
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            house.pool = house.pool.checked_add(amount).unwrap();
+            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Update agent stats
@@ -148,9 +148,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -236,12 +236,12 @@ pub mod agent_casino {
 
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            house.total_payout = house.total_payout.checked_add(payout).unwrap();
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            house.pool = house.pool.checked_add(amount).unwrap();
+            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
@@ -250,9 +250,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -338,12 +338,12 @@ pub mod agent_casino {
 
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            house.total_payout = house.total_payout.checked_add(payout).unwrap();
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            house.pool = house.pool.checked_add(amount).unwrap();
+            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
@@ -352,9 +352,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -442,12 +442,12 @@ pub mod agent_casino {
 
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            house.total_payout = house.total_payout.checked_add(payout).unwrap();
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            house.pool = house.pool.checked_add(amount).unwrap();
+            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
@@ -456,9 +456,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -645,7 +645,7 @@ pub mod agent_casino {
         };
 
         // Calculate payout: total pot minus 1% house edge
-        let total_pot = amount.checked_mul(2).unwrap();
+        let total_pot = amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
         let house_edge = ctx.accounts.house.house_edge_bps;
         let house_take = total_pot * house_edge as u64 / 10000;
         let winner_payout = total_pot - house_take;
@@ -678,8 +678,8 @@ pub mod agent_casino {
         // Update house stats
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(total_pot).unwrap();
-        house.pool = house.pool.checked_add(house_take).unwrap();
+        house.total_volume = house.total_volume.checked_add(total_pot).ok_or(CasinoError::MathOverflow)?;
+        house.pool = house.pool.checked_add(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Update challenger stats
         let challenger_stats = &mut ctx.accounts.challenger_stats;
@@ -687,10 +687,10 @@ pub mod agent_casino {
             challenger_stats.agent = ctx.accounts.challenger.key();
         }
         challenger_stats.total_games += 1;
-        challenger_stats.total_wagered = challenger_stats.total_wagered.checked_add(amount).unwrap();
+        challenger_stats.total_wagered = challenger_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).unwrap_or(challenger_stats.pvp_games);
         if challenger_won {
-            challenger_stats.total_won = challenger_stats.total_won.checked_add(winner_payout).unwrap();
+            challenger_stats.total_won = challenger_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
             challenger_stats.wins += 1;
             challenger_stats.pvp_wins = challenger_stats.pvp_wins.checked_add(1).unwrap_or(challenger_stats.pvp_wins);
         } else {
@@ -704,10 +704,10 @@ pub mod agent_casino {
             acceptor_stats.bump = ctx.bumps.acceptor_stats;
         }
         acceptor_stats.total_games += 1;
-        acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).unwrap();
+        acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).unwrap_or(acceptor_stats.pvp_games);
         if !challenger_won {
-            acceptor_stats.total_won = acceptor_stats.total_won.checked_add(winner_payout).unwrap();
+            acceptor_stats.total_won = acceptor_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
             acceptor_stats.wins += 1;
             acceptor_stats.pvp_wins = acceptor_stats.pvp_wins.checked_add(1).unwrap_or(acceptor_stats.pvp_wins);
         } else {
@@ -876,7 +876,7 @@ pub mod agent_casino {
 
         // Update market total (but NOT outcome pools - those stay hidden)
         let market = &mut ctx.accounts.market;
-        market.total_committed = market.total_committed.checked_add(amount).unwrap();
+        market.total_committed = market.total_committed.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         // Store commitment with timestamp for early bird bonus
         // Commitment = hash(project_slug || salt) - verified at reveal time
@@ -1008,7 +1008,7 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.pool = house.pool.checked_add(forfeit_amount).unwrap();
+        house.pool = house.pool.checked_add(forfeit_amount).ok_or(CasinoError::MathOverflow)?;
 
         // Reduce total pool (forfeit doesn't count toward payouts)
         let market = &mut ctx.accounts.market;
@@ -1065,7 +1065,7 @@ pub mod agent_casino {
 
         // Update house stats (volume tracked, fee will be added at claim time)
         let house = &mut ctx.accounts.house;
-        house.total_volume = house.total_volume.checked_add(total_pool).unwrap();
+        house.total_volume = house.total_volume.checked_add(total_pool).ok_or(CasinoError::MathOverflow)?;
 
         // Calculate what the max house take WOULD be (for event reporting)
         let house_edge = house.house_edge_bps;
@@ -1159,9 +1159,9 @@ pub mod agent_casino {
 
         let gross_winnings = (bet.amount as u128)
             .checked_mul(market.total_pool as u128)
-            .unwrap()
+            .ok_or(CasinoError::MathOverflow)?
             .checked_div(winning_pool as u128)
-            .unwrap() as u64;
+            .ok_or(CasinoError::MathOverflow)? as u64;
 
         // Calculate early bird discount factor (0-10000 basis points)
         // early_factor = (commit_deadline - committed_at) / (commit_deadline - created_at)
@@ -1185,9 +1185,9 @@ pub mod agent_casino {
         // Calculate fee amount on gross winnings
         let fee = (gross_winnings as u128)
             .checked_mul(effective_fee_bps as u128)
-            .unwrap()
+            .ok_or(CasinoError::MathOverflow)?
             .checked_div(10000)
-            .unwrap() as u64;
+            .ok_or(CasinoError::MathOverflow)? as u64;
 
         let net_winnings = gross_winnings.saturating_sub(fee);
 
@@ -1202,7 +1202,7 @@ pub mod agent_casino {
 
             // Update house pool
             let house = &mut ctx.accounts.house;
-            house.pool = house.pool.checked_add(fee).unwrap();
+            house.pool = house.pool.checked_add(fee).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Mark as claimed
@@ -1215,7 +1215,7 @@ pub mod agent_casino {
             agent_stats.agent = bettor_key;
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_won = agent_stats.total_won.checked_add(net_winnings).unwrap();
+        agent_stats.total_won = agent_stats.total_won.checked_add(net_winnings).ok_or(CasinoError::MathOverflow)?;
         agent_stats.wins += 1;
 
         emit!(PredictionWinningsClaimed {
@@ -1355,8 +1355,8 @@ pub mod agent_casino {
 
         // Update pool stats
         let pool = &mut ctx.accounts.memory_pool;
-        pool.total_memories = pool.total_memories.checked_add(1).unwrap();
-        pool.pool_balance = pool.pool_balance.checked_add(stake_amount).unwrap();
+        pool.total_memories = pool.total_memories.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        pool.pool_balance = pool.pool_balance.checked_add(stake_amount).ok_or(CasinoError::MathOverflow)?;
 
         // Store memory
         let memory = &mut ctx.accounts.memory;
@@ -1444,11 +1444,11 @@ pub mod agent_casino {
 
         // Update pool stats
         let pool = &mut ctx.accounts.memory_pool;
-        pool.total_pulls = pool.total_pulls.checked_add(1).unwrap();
+        pool.total_pulls = pool.total_pulls.checked_add(1).ok_or(CasinoError::MathOverflow)?;
 
         // Update memory stats
         let memory = &mut ctx.accounts.memory;
-        memory.times_pulled = memory.times_pulled.checked_add(1).unwrap();
+        memory.times_pulled = memory.times_pulled.checked_add(1).ok_or(CasinoError::MathOverflow)?;
 
         // Record the pull
         let pull_record = &mut ctx.accounts.pull_record;
@@ -1506,8 +1506,8 @@ pub mod agent_casino {
 
         // Update memory rating stats
         let memory = &mut ctx.accounts.memory;
-        memory.total_rating = memory.total_rating.checked_add(rating as u64).unwrap();
-        memory.rating_count = memory.rating_count.checked_add(1).unwrap();
+        memory.total_rating = memory.total_rating.checked_add(rating as u64).ok_or(CasinoError::MathOverflow)?;
+        memory.rating_count = memory.rating_count.checked_add(1).ok_or(CasinoError::MathOverflow)?;
 
         // Record the rating
         let pull_record = &mut ctx.accounts.pull_record;
@@ -1728,7 +1728,7 @@ pub mod agent_casino {
 
             let pool = &mut ctx.accounts.hit_pool;
             pool.total_completed += 1;
-            pool.total_bounties_paid = pool.total_bounties_paid.checked_add(payout).unwrap();
+            pool.total_bounties_paid = pool.total_bounties_paid.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
 
             emit!(HitCompleted {
                 hit: ctx.accounts.hit.key(),
@@ -1890,7 +1890,7 @@ pub mod agent_casino {
             let pool = &mut ctx.accounts.hit_pool;
             pool.total_completed += 1;
             if hunter_wins {
-                pool.total_bounties_paid = pool.total_bounties_paid.checked_add(hit.bounty).unwrap();
+                pool.total_bounties_paid = pool.total_bounties_paid.checked_add(hit.bounty).ok_or(CasinoError::MathOverflow)?;
             }
 
             emit!(ArbitrationResolved {
@@ -2002,11 +2002,11 @@ pub mod agent_casino {
             lp_position.mint = ctx.accounts.mint.key();
             lp_position.bump = ctx.bumps.lp_position;
         }
-        lp_position.deposited = lp_position.deposited.checked_add(amount).unwrap();
+        lp_position.deposited = lp_position.deposited.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         // Update vault pool
         let vault = &mut ctx.accounts.token_vault;
-        vault.pool = vault.pool.checked_add(amount).unwrap();
+        vault.pool = vault.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(TokenLiquidityAdded {
             vault: vault.key(),
@@ -2086,12 +2086,12 @@ pub mod agent_casino {
         // Update vault stats
         let vault = &mut ctx.accounts.token_vault;
         vault.total_games += 1;
-        vault.total_volume = vault.total_volume.checked_add(amount).unwrap();
+        vault.total_volume = vault.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            vault.total_payout = vault.total_payout.checked_add(payout).unwrap();
-            vault.pool = vault.pool.checked_sub(payout.saturating_sub(amount)).unwrap_or(0);
+            vault.total_payout = vault.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            vault.pool = vault.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            vault.pool = vault.pool.checked_add(amount).unwrap();
+            vault.pool = vault.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Update agent stats (shared with SOL games)
@@ -2101,9 +2101,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -2187,7 +2187,7 @@ pub mod agent_casino {
         // Update house stats
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(VrfRequestCreated {
             request: ctx.accounts.vrf_request.key(),
@@ -2234,10 +2234,10 @@ pub mod agent_casino {
         // Update house pool
         let house = &mut ctx.accounts.house;
         if won {
-            house.total_payout = house.total_payout.checked_add(payout).unwrap();
-            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).unwrap_or(0);
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
         } else {
-            house.pool = house.pool.checked_add(vrf_request.amount).unwrap();
+            house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Update agent stats
@@ -2247,9 +2247,9 @@ pub mod agent_casino {
             agent_stats.bump = ctx.bumps.agent_stats;
         }
         agent_stats.total_games += 1;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).unwrap();
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).unwrap();
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
             agent_stats.wins += 1;
         } else {
             agent_stats.losses += 1;
@@ -2331,7 +2331,7 @@ pub mod agent_casino {
         // Update house stats
         let house = &mut ctx.accounts.house;
         house.total_games += 1;
-        house.total_volume = house.total_volume.checked_add(bet_amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PricePredictionCreated {
             prediction: prediction_key,
@@ -2379,7 +2379,7 @@ pub mod agent_casino {
 
         // Update house volume
         let house = &mut ctx.accounts.house;
-        house.total_volume = house.total_volume.checked_add(bet_amount).unwrap();
+        house.total_volume = house.total_volume.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PricePredictionTaken {
             prediction: prediction_key,
@@ -2467,8 +2467,8 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.total_payout = house.total_payout.checked_add(payout).unwrap();
-        house.pool = house.pool.checked_add(house_take).unwrap();
+        house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+        house.pool = house.pool.checked_add(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Update prediction
         let prediction = &mut ctx.accounts.price_prediction;
@@ -4519,4 +4519,6 @@ pub enum CasinoError {
     InvalidCreatorAccount,
     #[msg("Invalid taker account")]
     InvalidTakerAccount,
+    #[msg("Arithmetic overflow")]
+    MathOverflow,
 }

@@ -5,6 +5,9 @@ use switchboard_on_demand::RandomnessAccountData;
 
 declare_id!("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
+/// Pyth oracle program ID (devnet)
+const PYTH_PROGRAM_ID: Pubkey = pubkey!("FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH");
+
 /// CPI helpers for cross-program invocation
 pub mod cpi_helpers;
 pub use cpi_helpers::*;
@@ -93,7 +96,7 @@ pub mod agent_casino {
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -132,7 +135,7 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -147,7 +150,7 @@ pub mod agent_casino {
             agent_stats.agent = ctx.accounts.player.key();
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -197,7 +200,7 @@ pub mod agent_casino {
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -209,7 +212,8 @@ pub mod agent_casino {
             ctx.accounts.house.key(),
         );
         let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-        let result = (combined[0] % 6) + 1;
+        let raw = u32::from_le_bytes([combined[0], combined[1], combined[2], combined[3]]);
+        let result = ((raw % 6) + 1) as u8;
 
         let won = result <= target;
         let multiplier = (600 / target as u64) as u16;
@@ -235,7 +239,7 @@ pub mod agent_casino {
         }
 
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -249,7 +253,7 @@ pub mod agent_casino {
             agent_stats.agent = ctx.accounts.player.key();
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -298,7 +302,7 @@ pub mod agent_casino {
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -337,7 +341,7 @@ pub mod agent_casino {
         }
 
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -351,7 +355,7 @@ pub mod agent_casino {
             agent_stats.agent = ctx.accounts.player.key();
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -401,7 +405,7 @@ pub mod agent_casino {
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -441,7 +445,7 @@ pub mod agent_casino {
         }
 
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -455,7 +459,7 @@ pub mod agent_casino {
             agent_stats.agent = ctx.accounts.player.key();
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -495,7 +499,7 @@ pub mod agent_casino {
     /// Get house stats
     pub fn get_house_stats(ctx: Context<GetHouseStats>) -> Result<HouseStats> {
         let house = &ctx.accounts.house;
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         Ok(HouseStats {
             pool: house.pool,
             house_edge_bps: house.house_edge_bps,
@@ -647,7 +651,7 @@ pub mod agent_casino {
         // Calculate payout: total pot minus 1% house edge
         let total_pot = amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
         let house_edge = ctx.accounts.house.house_edge_bps;
-        let house_take = total_pot * house_edge as u64 / 10000;
+        let house_take = total_pot.checked_mul(house_edge as u64).ok_or(CasinoError::MathOverflow)? / 10000;
         let winner_payout = total_pot - house_take;
 
         // Transfer house edge to house account
@@ -677,7 +681,7 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(total_pot).ok_or(CasinoError::MathOverflow)?;
         house.pool = house.pool.checked_add(house_take).ok_or(CasinoError::MathOverflow)?;
 
@@ -686,7 +690,7 @@ pub mod agent_casino {
         if challenger_stats.agent == Pubkey::default() {
             challenger_stats.agent = ctx.accounts.challenger.key();
         }
-        challenger_stats.total_games += 1;
+        challenger_stats.total_games = challenger_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         challenger_stats.total_wagered = challenger_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).unwrap_or(challenger_stats.pvp_games);
         if challenger_won {
@@ -703,7 +707,7 @@ pub mod agent_casino {
             acceptor_stats.agent = ctx.accounts.acceptor.key();
             acceptor_stats.bump = ctx.bumps.acceptor_stats;
         }
-        acceptor_stats.total_games += 1;
+        acceptor_stats.total_games = acceptor_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).unwrap_or(acceptor_stats.pvp_games);
         if !challenger_won {
@@ -1069,7 +1073,7 @@ pub mod agent_casino {
 
         // Calculate what the max house take WOULD be (for event reporting)
         let house_edge = house.house_edge_bps;
-        let max_house_take = total_pool * house_edge as u64 / 10000;
+        let max_house_take = total_pool.checked_mul(house_edge as u64).ok_or(CasinoError::MathOverflow)? / 10000;
 
         // Update market state with winning project
         let mut winner_bytes = [0u8; 50];
@@ -2030,7 +2034,7 @@ pub mod agent_casino {
 
         let vault = &ctx.accounts.token_vault;
         require!(amount >= vault.min_bet, CasinoError::BetTooSmall);
-        let max_bet = vault.pool * vault.max_bet_percent as u64 / 100;
+        let max_bet = vault.pool.checked_mul(vault.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(vault.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -2085,7 +2089,7 @@ pub mod agent_casino {
 
         // Update vault stats
         let vault = &mut ctx.accounts.token_vault;
-        vault.total_games += 1;
+        vault.total_games = vault.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         vault.total_volume = vault.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             vault.total_payout = vault.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -2100,7 +2104,7 @@ pub mod agent_casino {
             agent_stats.agent = ctx.accounts.player.key();
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -2153,7 +2157,7 @@ pub mod agent_casino {
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool * house.max_bet_percent as u64 / 100;
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
         require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
 
@@ -2186,7 +2190,7 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(VrfRequestCreated {
@@ -2246,7 +2250,7 @@ pub mod agent_casino {
             agent_stats.agent = vrf_request.player;
             agent_stats.bump = ctx.bumps.agent_stats;
         }
-        agent_stats.total_games += 1;
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
@@ -2330,7 +2334,7 @@ pub mod agent_casino {
 
         // Update house stats
         let house = &mut ctx.accounts.house;
-        house.total_games += 1;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PricePredictionCreated {
@@ -3207,8 +3211,8 @@ pub struct VerifyHit<'info> {
     /// CHECK: PDA vault holding bounty
     pub hit_vault: UncheckedAccount<'info>,
 
-    /// CHECK: Hunter account to receive payout
-    #[account(mut)]
+    /// CHECK: Hunter account to receive payout - validated against hit
+    #[account(mut, constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter)]
     pub hunter: AccountInfo<'info>,
 
     #[account(mut)]
@@ -3262,8 +3266,8 @@ pub struct ExpireClaim<'info> {
     /// CHECK: PDA vault holding stake
     pub hit_vault: UncheckedAccount<'info>,
 
-    /// CHECK: Poster to receive slashed stake
-    #[account(mut)]
+    /// CHECK: Poster to receive slashed stake - validated against hit
+    #[account(mut, constraint = poster.key() == hit.poster @ CasinoError::NotHitPoster)]
     pub poster: AccountInfo<'info>,
 
     /// CHECK: Anyone can call this to expire a stale claim
@@ -3301,12 +3305,12 @@ pub struct ArbitrateHit<'info> {
     )]
     pub arbitration: Account<'info, Arbitration>,
 
-    /// CHECK: Hunter account for potential payout
-    #[account(mut)]
+    /// CHECK: Hunter account for potential payout - validated against hit
+    #[account(mut, constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter)]
     pub hunter: AccountInfo<'info>,
 
-    /// CHECK: Poster account for potential refund
-    #[account(mut)]
+    /// CHECK: Poster account for potential refund - validated against hit
+    #[account(mut, constraint = poster.key() == hit.poster @ CasinoError::NotHitPoster)]
     pub poster: AccountInfo<'info>,
 
     #[account(mut)]
@@ -3479,11 +3483,12 @@ pub struct VrfCoinFlipSettle<'info> {
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
-    /// CHECK: Switchboard randomness account
+    /// CHECK: Switchboard randomness account - validated against vrf_request
+    #[account(constraint = randomness_account.key() == vrf_request.randomness_account @ CasinoError::VrfInvalidRandomness)]
     pub randomness_account: UncheckedAccount<'info>,
 
-    /// CHECK: Player to receive payout
-    #[account(mut)]
+    /// CHECK: Player to receive payout - validated against vrf_request
+    #[account(mut, constraint = player.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
     pub player: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -3540,15 +3545,16 @@ pub struct SettlePricePrediction<'info> {
     )]
     pub price_prediction: Account<'info, PricePrediction>,
 
-    /// CHECK: Pyth price feed account
+    /// CHECK: Pyth price feed account - owner validated against Pyth program
+    #[account(constraint = *price_feed.owner == PYTH_PROGRAM_ID @ CasinoError::InvalidPriceFeed)]
     pub price_feed: UncheckedAccount<'info>,
 
-    /// CHECK: Creator to receive payout if winner
-    #[account(mut)]
+    /// CHECK: Creator to receive payout - validated against prediction
+    #[account(mut, constraint = creator.key() == price_prediction.creator @ CasinoError::InvalidCreatorAccount)]
     pub creator: UncheckedAccount<'info>,
 
-    /// CHECK: Taker to receive payout if winner
-    #[account(mut)]
+    /// CHECK: Taker to receive payout - validated against prediction
+    #[account(mut, constraint = taker.key() == price_prediction.taker @ CasinoError::InvalidTakerAccount)]
     pub taker: UncheckedAccount<'info>,
 
     #[account(mut)]

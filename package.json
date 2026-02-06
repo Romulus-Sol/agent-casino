@@ -39,7 +39,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agent-casino/protocol"
+    "url": "https://github.com/Romulus-Sol/agent-casino"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.14"

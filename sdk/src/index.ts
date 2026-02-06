@@ -1052,7 +1052,7 @@ export class AgentCasino {
 
   /**
    * Deposit a memory into the pool
-   * @param content Memory content (max 2000 chars)
+   * @param content Memory content (max 500 chars)
    * @param category Memory category
    * @param rarity Memory rarity claim
    */

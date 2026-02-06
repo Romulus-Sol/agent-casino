@@ -402,6 +402,7 @@ class AgentCasino {
   smartCoinFlip(baseBet, choice): Promise<GameResult>
   smartDiceRoll(baseBet, target): Promise<GameResult>
   smartLimbo(baseBet, multiplier): Promise<GameResult>
+  smartCrash(baseBet, multiplier): Promise<GameResult>
   getBettingContext(): Promise<BettingContext>
   getRiskAdjustedBet(baseBet): Promise<{adjustedBet, context}>
 
@@ -415,6 +416,12 @@ class AgentCasino {
   getMemory(address): Promise<MemoryData>
   getMyMemories(): Promise<MemoryData[]>
   getActiveMemories(limit): Promise<MemoryData[]>
+
+  // SPL Token Games
+  initializeTokenVault(mint, houseEdgeBps, minBet, maxBetPercent): Promise<string>
+  tokenAddLiquidity(mint, amount): Promise<string>
+  tokenCoinFlip(mint, amount, choice): Promise<TokenGameResult>
+  getTokenVaultStats(mint): Promise<TokenVaultStats>
 
   // Stats & Liquidity
   getHouseStats(): Promise<HouseStats>

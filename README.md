@@ -30,7 +30,7 @@ That's it. You just played an on-chain coin flip on Solana devnet.
 | Limbo | `casino.limbo(0.1, 2.5)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `casino.crash(0.1, 1.5)` | 1/multiplier | multiplier * 0.99 |
 
-All games: 1% house edge, provably fair randomness via `Hash(server_seed || client_seed || player)`.
+All games: 1% house edge. Randomness via commit-reveal `Hash(server_seed || client_seed || player)` + optional Switchboard VRF for true on-chain randomness.
 
 ### SPL Token Support
 

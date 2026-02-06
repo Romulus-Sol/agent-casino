@@ -47,6 +47,14 @@ export interface CasinoConfig {
   minRiskMultiplier?: number; // Floor for risk-adjusted bets (default: 0.3)
 }
 
+export interface DecomposedRisk {
+  volatility: { current: number; avg30d: number; percentile: number; status: string };
+  liquidity: { spreadBps: number; slippage100k: number; status: string };
+  flashCrashProb: number;
+  correlationStatus: string;
+  fundingRates: { SOL: number; BTC: number; ETH: number };
+}
+
 export interface BettingContext {
   betMultiplier: number;
   riskScore: number;
@@ -58,6 +66,8 @@ export interface BettingContext {
   memecoinMania: { score: number; trend: string };
   solanaHealthy: boolean;
   timestamp: number;
+  decomposed?: DecomposedRisk;
+  gameMultipliers?: { coinFlip: number; diceRoll: number; limbo: number; crash: number };
 }
 
 export interface GameResult {
@@ -611,13 +621,15 @@ export class AgentCasino {
     }
 
     try {
-      // Fetch betting context and Solana health in parallel
-      const [ctxRes, solRes] = await Promise.all([
+      // Fetch betting context, Solana health, and decomposed risk in parallel
+      const [ctxRes, solRes, decompRes] = await Promise.all([
         fetch('https://wargames-api.vercel.app/live/betting-context'),
         fetch('https://wargames-api.vercel.app/live/solana'),
+        fetch('https://wargames-api.fly.dev/oracle/risk/decomposed'),
       ]);
       const ctx: any = await ctxRes.json();
       const sol: any = await solRes.json();
+      const decomp: any = await decompRes.json().catch(() => null);
 
       // Apply multiplier caps from config
       let multiplier = ctx.bet_multiplier || 1.0;
@@ -630,6 +642,48 @@ export class AgentCasino {
       if (!solanaHealthy) {
         multiplier = minMult; // Minimum bet if network is unhealthy
       }
+
+      // Parse decomposed risk factors
+      const volPercentile = decomp?.components?.volatility_regime?.percentile ?? 50;
+      const volStatus = decomp?.components?.volatility_regime?.status ?? 'normal';
+      const liqStatus = decomp?.components?.liquidity_stress?.status ?? 'normal';
+      const spreadBps = decomp?.components?.liquidity_stress?.average_spread_bps ?? 5;
+      const slippage = decomp?.components?.liquidity_stress?.average_slippage_100k ?? 0.1;
+      const flashProb = decomp?.components?.flash_crash_probability?.probability ?? 0.02;
+      const corrStatus = decomp?.components?.correlations?.status ?? 'normal';
+
+      const decomposed: DecomposedRisk = {
+        volatility: {
+          current: decomp?.components?.volatility_regime?.current_volatility ?? 0,
+          avg30d: decomp?.components?.volatility_regime?.rolling_30d_avg ?? 0,
+          percentile: volPercentile,
+          status: volStatus,
+        },
+        liquidity: { spreadBps, slippage100k: slippage, status: liqStatus },
+        flashCrashProb: flashProb,
+        correlationStatus: corrStatus,
+        fundingRates: {
+          SOL: decomp?.components?.funding_rates?.SOL?.current ?? 0,
+          BTC: decomp?.components?.funding_rates?.BTC?.current ?? 0,
+          ETH: decomp?.components?.funding_rates?.ETH?.current ?? 0,
+        },
+      };
+
+      // Compute game-specific multipliers using decomposed factors
+      // Coin flip (50/50, lowest risk game): mainly sentiment-driven
+      const coinFlipMult = multiplier;
+
+      // Dice roll (variable odds): factor in volatility
+      const volFactor = volPercentile > 75 ? 0.85 : volPercentile > 50 ? 0.95 : 1.0;
+      const diceRollMult = Math.max(minMult, multiplier * volFactor);
+
+      // Limbo (high multiplier targets): volatility + liquidity stress
+      const liqFactor = liqStatus === 'stressed' ? 0.8 : liqStatus === 'warning' ? 0.9 : 1.0;
+      const limboMult = Math.max(minMult, multiplier * volFactor * liqFactor);
+
+      // Crash (exponential risk): most aggressive — vol + flash crash + liquidity
+      const flashFactor = flashProb > 0.1 ? 0.7 : flashProb > 0.05 ? 0.85 : 1.0;
+      const crashMult = Math.max(minMult, multiplier * volFactor * liqFactor * flashFactor);
 
       this.cachedBettingContext = {
         betMultiplier: multiplier,
@@ -648,6 +702,13 @@ export class AgentCasino {
         },
         solanaHealthy,
         timestamp: Date.now(),
+        decomposed,
+        gameMultipliers: {
+          coinFlip: coinFlipMult,
+          diceRoll: diceRollMult,
+          limbo: limboMult,
+          crash: crashMult,
+        },
       };
       this.contextCacheTime = Date.now();
 
@@ -687,7 +748,9 @@ export class AgentCasino {
    */
   async smartCoinFlip(baseBetSol: number, choice: CoinChoice): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
-      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const context = await this.getBettingContext();
+      const mult = context.gameMultipliers?.coinFlip ?? context.betMultiplier;
+      const adjustedBet = baseBetSol * mult;
       const result = await this.coinFlip(adjustedBet, choice);
       return { ...result, riskContext: context };
     }
@@ -696,10 +759,13 @@ export class AgentCasino {
 
   /**
    * Dice roll with automatic risk adjustment
+   * Scales more aggressively in high-volatility environments
    */
   async smartDiceRoll(baseBetSol: number, target: DiceTarget): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
-      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const context = await this.getBettingContext();
+      const mult = context.gameMultipliers?.diceRoll ?? context.betMultiplier;
+      const adjustedBet = baseBetSol * mult;
       const result = await this.diceRoll(adjustedBet, target);
       return { ...result, riskContext: context };
     }
@@ -708,10 +774,13 @@ export class AgentCasino {
 
   /**
    * Limbo with automatic risk adjustment
+   * Factors in volatility + liquidity stress for high-multiplier targets
    */
   async smartLimbo(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
-      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const context = await this.getBettingContext();
+      const mult = context.gameMultipliers?.limbo ?? context.betMultiplier;
+      const adjustedBet = baseBetSol * mult;
       const result = await this.limbo(adjustedBet, targetMultiplier);
       return { ...result, riskContext: context };
     }
@@ -720,10 +789,13 @@ export class AgentCasino {
 
   /**
    * Crash with automatic risk adjustment
+   * Most aggressive scaling — factors in volatility + flash crash probability + liquidity
    */
   async smartCrash(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
-      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const context = await this.getBettingContext();
+      const mult = context.gameMultipliers?.crash ?? context.betMultiplier;
+      const adjustedBet = baseBetSol * mult;
       const result = await this.crash(adjustedBet, targetMultiplier);
       return { ...result, riskContext: context };
     }

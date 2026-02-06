@@ -543,7 +543,7 @@ export class AgentCasino {
       ],
       data: Buffer.from([
         // add_liquidity discriminator + amount
-        ...Buffer.from([0x1e, 0x0a, 0x18, 0x51, 0x45, 0x94, 0x2a, 0x17]),
+        ...Buffer.from([0xb5, 0x9d, 0x59, 0x43, 0x8f, 0xb6, 0x34, 0x48]),
         ...new BN(amountLamports).toArrayLike(Buffer, 'le', 8),
       ]),
     };
@@ -692,7 +692,7 @@ export class AgentCasino {
   async createMemoryPool(pullPriceSol: number, houseEdgeBps: number): Promise<string> {
     const pullPrice = Math.floor(pullPriceSol * LAMPORTS_PER_SOL);
 
-    const discriminator = Buffer.from([0xc5, 0xd7, 0x6a, 0x3a, 0x1f, 0x8b, 0x4e, 0x2c]);
+    const discriminator = Buffer.from([0x18, 0xfa, 0x9d, 0xbd, 0x42, 0x88, 0x4e, 0x44]);
     const instructionData = Buffer.concat([
       discriminator,
       new BN(pullPrice).toArrayLike(Buffer, 'le', 8),
@@ -757,7 +757,7 @@ export class AgentCasino {
     const contentLenBuf = Buffer.alloc(4);
     contentLenBuf.writeUInt32LE(contentBytes.length);
 
-    const discriminator = Buffer.from([0xd6, 0xe8, 0x7b, 0x4b, 0x2e, 0x9c, 0x5f, 0x3d]);
+    const discriminator = Buffer.from([0xb5, 0x09, 0xfd, 0x96, 0xc5, 0x2c, 0x3c, 0x51]);
     const instructionData = Buffer.concat([
       discriminator,
       contentLenBuf,
@@ -806,7 +806,7 @@ export class AgentCasino {
       PROGRAM_ID
     );
 
-    const discriminator = Buffer.from([0xe7, 0xf9, 0x8c, 0x5c, 0x3f, 0xad, 0x6e, 0x4e]);
+    const discriminator = Buffer.from([0x03, 0x2e, 0x7b, 0x92, 0x20, 0x40, 0x08, 0x3b]);
     const instructionData = Buffer.concat([
       discriminator,
       clientSeed,
@@ -865,7 +865,7 @@ export class AgentCasino {
       PROGRAM_ID
     );
 
-    const discriminator = Buffer.from([0xf8, 0x0a, 0x9d, 0x6d, 0x4e, 0xbe, 0x7f, 0x5f]);
+    const discriminator = Buffer.from([0x4a, 0xb0, 0xd5, 0x1c, 0x28, 0x7f, 0x0e, 0x14]);
     const instructionData = Buffer.concat([
       discriminator,
       Buffer.from([rating]),
@@ -893,7 +893,7 @@ export class AgentCasino {
   async withdrawMemory(memoryAddress: string): Promise<{ txSignature: string; refund: number; fee: number }> {
     const memoryPubkey = new PublicKey(memoryAddress);
 
-    const discriminator = Buffer.from([0x09, 0x1b, 0xae, 0x7e, 0x5f, 0xcf, 0x80, 0x60]);
+    const discriminator = Buffer.from([0x71, 0x47, 0x16, 0x1e, 0x2c, 0xa0, 0x71, 0x03]);
     const instructionData = discriminator;
 
     const ix = {
@@ -1269,25 +1269,34 @@ export class AgentCasino {
 
   private parseAgentStats(data: Buffer): any {
     let offset = 8; // Skip discriminator
-    
+
     const agent = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
-    
+
     const totalGames = new BN(data.slice(offset, offset + 8), 'le');
     offset += 8;
-    
+
     const totalWagered = new BN(data.slice(offset, offset + 8), 'le');
     offset += 8;
-    
+
     const totalWon = new BN(data.slice(offset, offset + 8), 'le');
     offset += 8;
-    
+
     const wins = new BN(data.slice(offset, offset + 8), 'le');
     offset += 8;
-    
-    const losses = new BN(data.slice(offset, offset + 8), 'le');
 
-    return { agent, totalGames, totalWagered, totalWon, wins, losses };
+    const losses = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const pvpGames = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const pvpWins = new BN(data.slice(offset, offset + 8), 'le');
+    offset += 8;
+
+    const bump = data[offset];
+
+    return { agent, totalGames, totalWagered, totalWon, wins, losses, pvpGames, pvpWins, bump };
   }
 
   private parseGameType(type: number): 'CoinFlip' | 'DiceRoll' | 'Limbo' | 'Crash' {
@@ -1311,10 +1320,10 @@ export class AgentCasino {
     // This would use the actual program IDL in production
     // For now, we build the instruction manually
     const discriminators: Record<string, Buffer> = {
-      coinFlip: Buffer.from([0x8a, 0x2c, 0x1d, 0x87, 0x54, 0x12, 0xf3, 0x01]),
-      diceRoll: Buffer.from([0x9b, 0x3d, 0x2e, 0x98, 0x65, 0x23, 0x04, 0x12]),
-      limbo: Buffer.from([0xac, 0x4e, 0x3f, 0xa9, 0x76, 0x34, 0x15, 0x23]),
-      crash: Buffer.from([0xbd, 0x5f, 0x40, 0xba, 0x87, 0x45, 0x26, 0x34]),
+      coinFlip: Buffer.from([0xe5, 0x7c, 0x1f, 0x02, 0xa6, 0x8b, 0x22, 0xf8]),
+      diceRoll: Buffer.from([0xea, 0x49, 0x6c, 0xd7, 0x8c, 0x3c, 0x9c, 0x5a]),
+      limbo: Buffer.from([0xa0, 0xbf, 0x98, 0x88, 0x67, 0xcf, 0xd6, 0x9f]),
+      crash: Buffer.from([0x70, 0xba, 0x37, 0x35, 0x24, 0x26, 0x2b, 0x6e]),
     };
 
     const instructionData = Buffer.concat([

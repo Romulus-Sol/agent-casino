@@ -508,13 +508,46 @@ pub mod agent_casino {
         })
     }
 
-    /// Update agent stats
+    /// Update/migrate agent stats (handles old-size accounts)
     pub fn update_agent_stats(ctx: Context<UpdateAgentStats>) -> Result<()> {
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.agent.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
+        let agent_stats_info = ctx.accounts.agent_stats.to_account_info();
+        let expected_size = 8 + AgentStats::INIT_SPACE;
+
+        if agent_stats_info.data_len() == 0 {
+            // Account doesn't exist yet - nothing to migrate
+            return Ok(());
         }
+
+        if agent_stats_info.data_len() != expected_size {
+            // Need to realloc - account is wrong size
+            let rent = Rent::get()?;
+            let new_min_balance = rent.minimum_balance(expected_size);
+            let current_lamports = agent_stats_info.lamports();
+
+            if new_min_balance > current_lamports {
+                let diff = new_min_balance - current_lamports;
+                system_program::transfer(
+                    CpiContext::new(
+                        ctx.accounts.system_program.to_account_info(),
+                        system_program::Transfer {
+                            from: ctx.accounts.agent.to_account_info(),
+                            to: agent_stats_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+
+            agent_stats_info.realloc(expected_size, false)?;
+
+            // Return excess rent to agent if account shrank
+            if current_lamports > new_min_balance {
+                let diff = current_lamports - new_min_balance;
+                **agent_stats_info.try_borrow_mut_lamports()? -= diff;
+                **ctx.accounts.agent.to_account_info().try_borrow_mut_lamports()? += diff;
+            }
+        }
+
         Ok(())
     }
 
@@ -2663,14 +2696,13 @@ pub struct GetHouseStats<'info> {
 
 #[derive(Accounts)]
 pub struct UpdateAgentStats<'info> {
+    /// CHECK: Manual reallocation for migration of old-size accounts
     #[account(
-        init_if_needed,
-        payer = agent,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", agent.key().as_ref()],
         bump
     )]
-    pub agent_stats: Account<'info, AgentStats>,
+    pub agent_stats: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub agent: Signer<'info>,

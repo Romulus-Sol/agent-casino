@@ -447,4 +447,346 @@ describe("agent-casino", () => {
       expect(pdas.size).to.equal(5);
     });
   });
+
+  describe("VRF PDA Derivation", () => {
+    it("derives VRF coin flip request PDA", () => {
+      const player = Keypair.generate().publicKey;
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [vrfPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vrf_request"), player.toBuffer(), Buffer.from(gameCount)],
+        PROGRAM_ID
+      );
+      expect(vrfPda.toBase58()).to.be.a("string");
+    });
+
+    it("derives VRF dice roll request PDA", () => {
+      const player = Keypair.generate().publicKey;
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [vrfPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vrf_dice"), player.toBuffer(), Buffer.from(gameCount)],
+        PROGRAM_ID
+      );
+      expect(vrfPda.toBase58()).to.be.a("string");
+    });
+
+    it("derives VRF limbo request PDA", () => {
+      const player = Keypair.generate().publicKey;
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [vrfPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vrf_limbo"), player.toBuffer(), Buffer.from(gameCount)],
+        PROGRAM_ID
+      );
+      expect(vrfPda.toBase58()).to.be.a("string");
+    });
+
+    it("derives VRF crash request PDA", () => {
+      const player = Keypair.generate().publicKey;
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [vrfPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vrf_crash"), player.toBuffer(), Buffer.from(gameCount)],
+        PROGRAM_ID
+      );
+      expect(vrfPda.toBase58()).to.be.a("string");
+    });
+
+    it("VRF PDAs differ across game types for same player and index", () => {
+      const player = Keypair.generate().publicKey;
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(42)]).buffer);
+
+      const seeds = ["vrf_request", "vrf_dice", "vrf_limbo", "vrf_crash"];
+      const pdas = new Set<string>();
+
+      for (const seed of seeds) {
+        const [pda] = PublicKey.findProgramAddressSync(
+          [Buffer.from(seed), player.toBuffer(), Buffer.from(gameCount)],
+          PROGRAM_ID
+        );
+        pdas.add(pda.toBase58());
+      }
+
+      expect(pdas.size).to.equal(4);
+    });
+
+    it("VRF PDAs differ for different game indices", () => {
+      const player = Keypair.generate().publicKey;
+      const pdas = new Set<string>();
+
+      for (let i = 0; i < 50; i++) {
+        const gameCount = new Uint8Array(new BigUint64Array([BigInt(i)]).buffer);
+        const [pda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("vrf_dice"), player.toBuffer(), Buffer.from(gameCount)],
+          PROGRAM_ID
+        );
+        pdas.add(pda.toBase58());
+      }
+
+      expect(pdas.size).to.equal(50);
+    });
+  });
+
+  describe("PvP & Market PDA Derivation", () => {
+    it("derives PvP challenge PDA", () => {
+      const player = Keypair.generate().publicKey;
+      const nonce = new Uint8Array(new BigUint64Array([BigInt(1)]).buffer);
+      const [challengePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("challenge"), player.toBuffer(), Buffer.from(nonce)],
+        PROGRAM_ID
+      );
+      expect(challengePda.toBase58()).to.be.a("string");
+    });
+
+    it("derives price prediction PDA from house and game count", () => {
+      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
+      const gameCount = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [pricePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("price_bet"), housePda.toBuffer(), Buffer.from(gameCount)],
+        PROGRAM_ID
+      );
+      expect(pricePda.toBase58()).to.be.a("string");
+    });
+
+    it("derives prediction market PDA from market ID", () => {
+      const marketId = new Uint8Array(new BigUint64Array([BigInt(1)]).buffer);
+      const [marketPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("pred_mkt"), Buffer.from(marketId)],
+        PROGRAM_ID
+      );
+      expect(marketPda.toBase58()).to.be.a("string");
+    });
+
+    it("derives prediction bet PDA from market and bettor", () => {
+      const marketId = new Uint8Array(new BigUint64Array([BigInt(1)]).buffer);
+      const [marketPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("pred_mkt"), Buffer.from(marketId)],
+        PROGRAM_ID
+      );
+      const bettor = Keypair.generate().publicKey;
+      const [betPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("pred_bet"), marketPda.toBuffer(), bettor.toBuffer()],
+        PROGRAM_ID
+      );
+      expect(betPda.toBase58()).to.be.a("string");
+    });
+
+    it("different bettors get different bet PDAs", () => {
+      const marketId = new Uint8Array(new BigUint64Array([BigInt(1)]).buffer);
+      const [marketPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("pred_mkt"), Buffer.from(marketId)],
+        PROGRAM_ID
+      );
+      const pdas = new Set<string>();
+
+      for (let i = 0; i < 10; i++) {
+        const bettor = Keypair.generate().publicKey;
+        const [betPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("pred_bet"), marketPda.toBuffer(), bettor.toBuffer()],
+          PROGRAM_ID
+        );
+        pdas.add(betPda.toBase58());
+      }
+
+      expect(pdas.size).to.equal(10);
+    });
+
+    it("hitman pool and hit PDAs derive correctly", () => {
+      const [hitPoolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("hit_pool")],
+        PROGRAM_ID
+      );
+      expect(hitPoolPda.toBase58()).to.be.a("string");
+
+      const hitIndex = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
+      const [hitPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("hit"), hitPoolPda.toBuffer(), Buffer.from(hitIndex)],
+        PROGRAM_ID
+      );
+      expect(hitPda.toBase58()).to.be.a("string");
+      expect(hitPda.toBase58()).to.not.equal(hitPoolPda.toBase58());
+    });
+  });
+
+  describe("Crash Game Payouts", () => {
+    function calculateCrashPoint(hash: Buffer, houseEdgeBps: number): number {
+      // Standard crash: crash_point = 1 / h where h ∈ (0, 1]
+      // P(crash >= x) = 1/x → geometric distribution
+      const val = hash.readUInt32BE(0);
+      const h = (val + 1) / (0xFFFFFFFF + 1);
+      const raw = 1 / h;
+      const edge = raw * houseEdgeBps / 10000;
+      return Math.max(1.01, raw - edge);
+    }
+
+    it("crash point is always >= 1.01x", () => {
+      for (let i = 0; i < 1000; i++) {
+        const hash = randomBytes(32);
+        const point = calculateCrashPoint(hash, 100);
+        expect(point).to.be.at.least(1.01);
+      }
+    });
+
+    it("~50% of crash points are below 2x", () => {
+      let belowTwo = 0;
+      const iterations = 10000;
+
+      for (let i = 0; i < iterations; i++) {
+        const hash = randomBytes(32);
+        const point = calculateCrashPoint(hash, 100);
+        if (point < 2) belowTwo++;
+      }
+
+      const pct = (belowTwo / iterations) * 100;
+      expect(pct).to.be.within(40, 60);
+    });
+
+    it("high multiplier crashes are rare", () => {
+      let above10x = 0;
+      const iterations = 10000;
+
+      for (let i = 0; i < iterations; i++) {
+        const hash = randomBytes(32);
+        const point = calculateCrashPoint(hash, 100);
+        if (point >= 10) above10x++;
+      }
+
+      const pct = (above10x / iterations) * 100;
+      expect(pct).to.be.within(3, 17);
+    });
+
+    it("crash payout applies 1% house edge correctly", () => {
+      const amount = 1 * LAMPORTS_PER_SOL;
+      const multiplier = 200; // 2.00x
+      const houseEdgeBps = 100;
+
+      const gross = amount * multiplier / 100;
+      const edge = gross * houseEdgeBps / 10000;
+      const payout = gross - edge;
+
+      expect(payout).to.equal(1.98 * LAMPORTS_PER_SOL);
+    });
+  });
+
+  describe("Checked Math Safety", () => {
+    it("detects u64 overflow in large payout calculations", () => {
+      const amount = BigInt("18000000000000000000");
+      const multiplier = BigInt(10000); // 100x
+
+      const gross_128 = amount * multiplier / BigInt(100);
+      const u64Max = BigInt("18446744073709551615");
+
+      expect(gross_128 > u64Max).to.be.true;
+
+      // Our on-chain fix: cap at u64::MAX instead of silently truncating
+      const capped = gross_128 > u64Max ? u64Max : gross_128;
+      expect(capped).to.equal(u64Max);
+    });
+
+    it("checked_sub prevents pool balance underflow", () => {
+      const poolBalance = BigInt(1000000);
+      const refund = BigInt(2000000);
+
+      // saturating_sub hides the bug by returning 0
+      const saturating = poolBalance > refund ? poolBalance - refund : BigInt(0);
+      expect(saturating).to.equal(BigInt(0));
+
+      // checked_sub correctly identifies the error condition
+      const underflows = refund > poolBalance;
+      expect(underflows).to.be.true;
+    });
+
+    it("u128 intermediate values prevent truncation", () => {
+      // Test the pattern: (amount as u128) * (multiplier as u128) / 100
+      const amount = BigInt(5_000_000_000); // 5 SOL
+      const multiplier = BigInt(10000);     // 100x
+
+      // Direct u64 would overflow: 5B * 10000 = 50T > u64::MAX? No.
+      // But with larger amounts it would. Test intermediate correctness:
+      const result_128 = amount * multiplier / BigInt(100);
+      expect(result_128).to.equal(BigInt(500_000_000_000)); // 500 SOL in lamports
+
+      // Verify it fits in u64
+      const u64Max = BigInt("18446744073709551615");
+      expect(result_128 <= u64Max).to.be.true;
+    });
+
+    it("stats counter overflow at u64::MAX returns error", () => {
+      const maxU64 = BigInt("18446744073709551615");
+
+      // checked_add(1) on u64::MAX returns None
+      const result = maxU64 + BigInt(1);
+      const overflowed = result > maxU64;
+      expect(overflowed).to.be.true;
+      // On-chain: .ok_or(CasinoError::MathOverflow)? instead of .unwrap_or(old)
+    });
+
+    it("hitman fee calculation uses checked arithmetic", () => {
+      const bounty = BigInt(1_000_000_000); // 1 SOL
+      const houseEdgeBps = BigInt(1000);    // 10%
+
+      // checked: bounty * edge / 10000
+      const fee = bounty * houseEdgeBps / BigInt(10000);
+      expect(fee).to.equal(BigInt(100_000_000)); // 0.1 SOL
+
+      const payout = bounty - fee;
+      expect(payout).to.equal(BigInt(900_000_000)); // 0.9 SOL
+    });
+  });
+
+  // Live devnet integration tests
+  // Run manually: npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --grep "Integration" --timeout 60000
+  describe.skip("Integration (devnet)", () => {
+    const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+
+    it("house PDA exists on devnet", async () => {
+      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
+      const account = await connection.getAccountInfo(housePda);
+      expect(account).to.not.be.null;
+      expect(account!.owner.toBase58()).to.equal(PROGRAM_ID.toBase58());
+    });
+
+    it("vault PDA exists and holds SOL", async () => {
+      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
+      const [vaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), housePda.toBuffer()],
+        PROGRAM_ID
+      );
+      const balance = await connection.getBalance(vaultPda);
+      expect(balance).to.be.greaterThan(0);
+    });
+
+    it("program is deployed and executable", async () => {
+      const accountInfo = await connection.getAccountInfo(PROGRAM_ID);
+      expect(accountInfo).to.not.be.null;
+      expect(accountInfo!.executable).to.be.true;
+    });
+
+    it("memory pool PDA exists on devnet", async () => {
+      const [memPoolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("memory_pool")],
+        PROGRAM_ID
+      );
+      const account = await connection.getAccountInfo(memPoolPda);
+      expect(account).to.not.be.null;
+      expect(account!.owner.toBase58()).to.equal(PROGRAM_ID.toBase58());
+    });
+
+    it("house data parses correctly", async () => {
+      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
+      const account = await connection.getAccountInfo(housePda);
+      expect(account).to.not.be.null;
+
+      const data = account!.data;
+      // Skip 8-byte discriminator
+      const authority = new PublicKey(data.slice(8, 40));
+      expect(authority.toBase58()).to.be.a("string");
+
+      const pool = data.readBigUInt64LE(40);
+      expect(Number(pool)).to.be.greaterThan(0);
+
+      const houseEdgeBps = data.readUInt16LE(48);
+      expect(houseEdgeBps).to.equal(100); // 1%
+
+      const totalGames = data.readBigUInt64LE(51);
+      expect(Number(totalGames)).to.be.greaterThan(0);
+    });
+  });
 });

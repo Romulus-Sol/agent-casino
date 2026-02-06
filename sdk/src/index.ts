@@ -1845,6 +1845,576 @@ export class AgentCasino {
     return new Transaction().add(ix);
   }
 
+  // === PvP Challenge Methods ===
+
+  /**
+   * Create a PvP coin flip challenge for another agent to accept
+   */
+  async createChallenge(amountSol: number, choice: 'heads' | 'tails', nonce?: number): Promise<{ tx: string; challengeAddress: string }> {
+    await this.loadProgram();
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+    const choiceVal = choice === 'heads' ? 0 : 1;
+    const nonceBn = new BN(nonce ?? Date.now());
+
+    const [challengePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("challenge"), this.wallet.publicKey.toBuffer(), nonceBn.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .createChallenge(amount, choiceVal, nonceBn)
+      .accounts({
+        house: this.housePda,
+        challenge: challengePda,
+        challenger: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, challengeAddress: challengePda.toString() };
+  }
+
+  /**
+   * Accept an open PvP challenge
+   */
+  async acceptChallenge(challengeAddress: string): Promise<{ tx: string; won: boolean; result: number }> {
+    await this.loadProgram();
+    const challengePda = new PublicKey(challengeAddress);
+    const challenge = await this.program.account.challenge.fetch(challengePda);
+
+    const [challengerStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), challenge.challenger.toBuffer()],
+      PROGRAM_ID
+    );
+    const [acceptorStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const clientSeed = Array.from(randomBytes(32));
+
+    const tx = await this.program.methods
+      .acceptChallenge(clientSeed)
+      .accounts({
+        house: this.housePda,
+        challenge: challengePda,
+        challenger: challenge.challenger,
+        challengerStats: challengerStatsPda,
+        acceptorStats: acceptorStatsPda,
+        acceptor: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    // Fetch result
+    await new Promise(r => setTimeout(r, 2000));
+    const result = await this.program.account.challenge.fetch(challengePda);
+    const won = result.winner.toString() === this.wallet.publicKey.toString();
+    return { tx, won, result: result.result };
+  }
+
+  /**
+   * Cancel your own open PvP challenge
+   */
+  async cancelChallenge(challengeAddress: string): Promise<string> {
+    await this.loadProgram();
+    const challengePda = new PublicKey(challengeAddress);
+    return await this.program.methods
+      .cancelChallenge()
+      .accounts({
+        challenge: challengePda,
+        challenger: this.wallet.publicKey,
+      })
+      .rpc();
+  }
+
+  // === Price Prediction Methods ===
+
+  /**
+   * Create a price prediction bet (Pyth oracle-settled)
+   */
+  async createPricePrediction(
+    asset: 'BTC' | 'SOL' | 'ETH',
+    targetPrice: number,
+    direction: 'above' | 'below',
+    durationSeconds: number,
+    amountSol: number
+  ): Promise<{ tx: string; predictionAddress: string }> {
+    await this.loadProgram();
+    const assetEnum = { [asset.toLowerCase()]: {} };
+    const directionEnum = { [direction]: {} };
+    const targetPricePyth = new BN(Math.round(targetPrice * 1e8));
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const gameCount = houseAccount.totalGames;
+
+    const [predictionPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("price_bet"), this.housePda.toBuffer(), gameCount.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .createPricePrediction(assetEnum, targetPricePyth, directionEnum, new BN(durationSeconds), amount)
+      .accounts({
+        house: this.housePda,
+        pricePrediction: predictionPda,
+        creator: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, predictionAddress: predictionPda.toString() };
+  }
+
+  /**
+   * Take the opposite side of an existing price prediction
+   */
+  async takePricePrediction(predictionAddress: string): Promise<string> {
+    await this.loadProgram();
+    const predictionPda = new PublicKey(predictionAddress);
+    const prediction = await this.program.account.pricePrediction.fetch(predictionPda);
+
+    return await this.program.methods
+      .takePricePrediction()
+      .accounts({
+        house: this.housePda,
+        pricePrediction: predictionPda,
+        taker: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  /**
+   * Settle a price prediction using Pyth oracle
+   */
+  async settlePricePrediction(predictionAddress: string, priceFeedAddress: string): Promise<string> {
+    await this.loadProgram();
+    const predictionPda = new PublicKey(predictionAddress);
+    const prediction = await this.program.account.pricePrediction.fetch(predictionPda);
+
+    return await this.program.methods
+      .settlePricePrediction()
+      .accounts({
+        house: this.housePda,
+        pricePrediction: predictionPda,
+        priceFeed: new PublicKey(priceFeedAddress),
+        creator: prediction.creator,
+        taker: prediction.taker,
+        settler: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  /**
+   * Cancel an unmatched price prediction (creator only)
+   */
+  async cancelPricePrediction(predictionAddress: string): Promise<string> {
+    await this.loadProgram();
+    const predictionPda = new PublicKey(predictionAddress);
+    return await this.program.methods
+      .cancelPricePrediction()
+      .accounts({
+        house: this.housePda,
+        pricePrediction: predictionPda,
+        creator: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  // === Prediction Market Methods ===
+
+  /**
+   * Create a prediction market with commit-reveal mechanism
+   */
+  async createPredictionMarket(
+    question: string,
+    outcomes: string[],
+    commitDeadlineUnix: number,
+    revealDeadlineUnix: number,
+    marketId?: number
+  ): Promise<{ tx: string; marketAddress: string }> {
+    await this.loadProgram();
+    const mId = new BN(marketId ?? Date.now());
+
+    const [marketPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pred_mkt"), mId.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .createPredictionMarket(mId, question, outcomes, new BN(commitDeadlineUnix), new BN(revealDeadlineUnix))
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        authority: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, marketAddress: marketPda.toString() };
+  }
+
+  /**
+   * Commit a hidden bet to a prediction market (hash of choice + salt)
+   */
+  async commitPredictionBet(
+    marketAddress: string,
+    commitment: Buffer,
+    amountSol: number
+  ): Promise<{ tx: string; betAddress: string }> {
+    await this.loadProgram();
+    const marketPda = new PublicKey(marketAddress);
+
+    const [betPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pred_bet"), marketPda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .commitPredictionBet(Array.from(commitment), new BN(amountSol * LAMPORTS_PER_SOL))
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        bet: betPda,
+        bettor: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, betAddress: betPda.toString() };
+  }
+
+  /**
+   * Start the reveal phase for a prediction market (authority only)
+   */
+  async startRevealPhase(marketAddress: string): Promise<string> {
+    await this.loadProgram();
+    const marketPda = new PublicKey(marketAddress);
+    return await this.program.methods
+      .startRevealPhase()
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        authority: this.wallet.publicKey,
+      })
+      .rpc();
+  }
+
+  /**
+   * Reveal your prediction bet (after commit phase ends)
+   */
+  async revealPredictionBet(
+    marketAddress: string,
+    predictedProject: string,
+    salt: Buffer
+  ): Promise<string> {
+    await this.loadProgram();
+    const marketPda = new PublicKey(marketAddress);
+
+    const [betPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pred_bet"), marketPda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    return await this.program.methods
+      .revealPredictionBet(predictedProject, Array.from(salt), new BN(0))
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        bet: betPda,
+        bettor: this.wallet.publicKey,
+      })
+      .rpc();
+  }
+
+  /**
+   * Resolve a prediction market with the winning outcome (authority only)
+   */
+  async resolvePredictionMarket(
+    marketAddress: string,
+    winningProject: string
+  ): Promise<string> {
+    await this.loadProgram();
+    const marketPda = new PublicKey(marketAddress);
+    const market = await this.program.account.predictionMarket.fetch(marketPda);
+
+    return await this.program.methods
+      .resolvePredictionMarket(winningProject, market.totalPool)
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        authority: this.wallet.publicKey,
+      })
+      .rpc();
+  }
+
+  /**
+   * Claim prediction market winnings
+   */
+  async claimPredictionWinnings(marketAddress: string): Promise<string> {
+    await this.loadProgram();
+    const marketPda = new PublicKey(marketAddress);
+
+    const [betPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("pred_bet"), marketPda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    return await this.program.methods
+      .claimPredictionWinnings()
+      .accounts({
+        house: this.housePda,
+        market: marketPda,
+        bet: betPda,
+        agentStats: agentStatsPda,
+        winner: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  // === VRF Game Methods (Switchboard Randomness) ===
+
+  /**
+   * Request a VRF coin flip (2-step: request then settle)
+   */
+  async vrfCoinFlipRequest(amountSol: number, choice: 'heads' | 'tails', randomnessAccount: string): Promise<{ tx: string; vrfRequestAddress: string }> {
+    await this.loadProgram();
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+    const choiceVal = choice === 'heads' ? 0 : 1;
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const [vrfRequestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vrf_request"), this.wallet.publicKey.toBuffer(), houseAccount.totalGames.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfCoinFlipRequest(amount, choiceVal)
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, vrfRequestAddress: vrfRequestPda.toString() };
+  }
+
+  /**
+   * Settle a VRF coin flip after Switchboard randomness is ready
+   */
+  async vrfCoinFlipSettle(vrfRequestAddress: string, randomnessAccount: string): Promise<{ tx: string; won: boolean; payout: number }> {
+    await this.loadProgram();
+    const vrfRequestPda = new PublicKey(vrfRequestAddress);
+    const vrfRequest = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), vrfRequest.player.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfCoinFlipSettle()
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        agentStats: agentStatsPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: vrfRequest.player,
+        settler: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const settled = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+    return { tx, won: settled.payout.toNumber() > 0, payout: settled.payout.toNumber() / LAMPORTS_PER_SOL };
+  }
+
+  /**
+   * Request a VRF dice roll
+   */
+  async vrfDiceRollRequest(amountSol: number, target: number, randomnessAccount: string): Promise<{ tx: string; vrfRequestAddress: string }> {
+    await this.loadProgram();
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const [vrfRequestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vrf_dice"), this.wallet.publicKey.toBuffer(), houseAccount.totalGames.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfDiceRollRequest(amount, target)
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, vrfRequestAddress: vrfRequestPda.toString() };
+  }
+
+  /**
+   * Settle a VRF dice roll
+   */
+  async vrfDiceRollSettle(vrfRequestAddress: string, randomnessAccount: string): Promise<{ tx: string; won: boolean; payout: number; result: number }> {
+    await this.loadProgram();
+    const vrfRequestPda = new PublicKey(vrfRequestAddress);
+    const vrfRequest = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), vrfRequest.player.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfDiceRollSettle()
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        agentStats: agentStatsPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: vrfRequest.player,
+        settler: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const settled = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+    return { tx, won: settled.payout.toNumber() > 0, payout: settled.payout.toNumber() / LAMPORTS_PER_SOL, result: settled.result };
+  }
+
+  /**
+   * Request a VRF limbo game
+   */
+  async vrfLimboRequest(amountSol: number, targetMultiplier: number, randomnessAccount: string): Promise<{ tx: string; vrfRequestAddress: string }> {
+    await this.loadProgram();
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+    const multiplier = Math.round(targetMultiplier * 100); // Convert 2.5x to 250
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const [vrfRequestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vrf_limbo"), this.wallet.publicKey.toBuffer(), houseAccount.totalGames.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfLimboRequest(amount, multiplier)
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, vrfRequestAddress: vrfRequestPda.toString() };
+  }
+
+  /**
+   * Settle a VRF limbo game
+   */
+  async vrfLimboSettle(vrfRequestAddress: string, randomnessAccount: string): Promise<{ tx: string; won: boolean; payout: number }> {
+    await this.loadProgram();
+    const vrfRequestPda = new PublicKey(vrfRequestAddress);
+    const vrfRequest = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), vrfRequest.player.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfLimboSettle()
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        agentStats: agentStatsPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: vrfRequest.player,
+        settler: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const settled = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+    return { tx, won: settled.payout.toNumber() > 0, payout: settled.payout.toNumber() / LAMPORTS_PER_SOL };
+  }
+
+  /**
+   * Request a VRF crash game
+   */
+  async vrfCrashRequest(amountSol: number, cashoutMultiplier: number, randomnessAccount: string): Promise<{ tx: string; vrfRequestAddress: string }> {
+    await this.loadProgram();
+    const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+    const multiplier = Math.round(cashoutMultiplier * 100); // Convert 2.5x to 250
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const [vrfRequestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vrf_crash"), this.wallet.publicKey.toBuffer(), houseAccount.totalGames.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfCrashRequest(amount, multiplier)
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, vrfRequestAddress: vrfRequestPda.toString() };
+  }
+
+  /**
+   * Settle a VRF crash game
+   */
+  async vrfCrashSettle(vrfRequestAddress: string, randomnessAccount: string): Promise<{ tx: string; won: boolean; payout: number }> {
+    await this.loadProgram();
+    const vrfRequestPda = new PublicKey(vrfRequestAddress);
+    const vrfRequest = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), vrfRequest.player.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .vrfCrashSettle()
+      .accounts({
+        house: this.housePda,
+        vrfRequest: vrfRequestPda,
+        agentStats: agentStatsPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        player: vrfRequest.player,
+        settler: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const settled = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+    return { tx, won: settled.payout.toNumber() > 0, payout: settled.payout.toNumber() / LAMPORTS_PER_SOL };
+  }
+
   private formatGameResult(
     signature: string,
     record: any,
@@ -1867,6 +2437,9 @@ export class AgentCasino {
     };
   }
 }
+
+// === Hitman Market Re-export ===
+export { HitmanMarket, type Hit, type HitPoolStats } from './hitman';
 
 // === Helper Classes ===
 

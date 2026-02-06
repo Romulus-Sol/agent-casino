@@ -56,3 +56,7 @@ demo/demo-wallet.json
 
 # Prediction market reveal files (contain secret salts)
 reveal-*.json
+
+# AI agent working directories
+.agents/
+.claude/

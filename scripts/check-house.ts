@@ -1,10 +1,17 @@
 import * as anchor from "@coral-xyz/anchor";
-import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { PublicKey, LAMPORTS_PER_SOL, Connection, clusterApiUrl } from "@solana/web3.js";
+import { loadWallet } from "./utils/wallet";
 
 const PROGRAM_ID = new PublicKey("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
 async function main() {
-  const provider = anchor.AnchorProvider.env();
+  const walletConfig = loadWallet();
+  const connection = new Connection(
+    process.env.ANCHOR_PROVIDER_URL || clusterApiUrl("devnet"),
+    "confirmed"
+  );
+  const wallet = new anchor.Wallet(walletConfig.keypair);
+  const provider = new anchor.AnchorProvider(connection, wallet, {});
   anchor.setProvider(provider);
 
   const [housePda] = PublicKey.findProgramAddressSync(

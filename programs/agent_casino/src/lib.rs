@@ -320,7 +320,12 @@ pub mod agent_casino {
 
         let won = result_multiplier >= target_multiplier;
         let payout = if won {
-            (amount as u128 * target_multiplier as u128 / 100) as u64
+            let p = (amount as u128)
+                .checked_mul(target_multiplier as u128)
+                .ok_or(CasinoError::MathOverflow)?
+                / 100;
+            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
+            p as u64
         } else {
             0
         };
@@ -424,7 +429,12 @@ pub mod agent_casino {
         // Player wins if the crash point is >= their cashout multiplier
         let won = crash_point >= cashout_multiplier;
         let payout = if won {
-            (amount as u128 * cashout_multiplier as u128 / 100) as u64
+            let p = (amount as u128)
+                .checked_mul(cashout_multiplier as u128)
+                .ok_or(CasinoError::MathOverflow)?
+                / 100;
+            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
+            p as u64
         } else {
             0
         };
@@ -692,11 +702,11 @@ pub mod agent_casino {
         }
         challenger_stats.total_games = challenger_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         challenger_stats.total_wagered = challenger_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).unwrap_or(challenger_stats.pvp_games);
+        challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         if challenger_won {
             challenger_stats.total_won = challenger_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
             challenger_stats.wins += 1;
-            challenger_stats.pvp_wins = challenger_stats.pvp_wins.checked_add(1).unwrap_or(challenger_stats.pvp_wins);
+            challenger_stats.pvp_wins = challenger_stats.pvp_wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
             challenger_stats.losses += 1;
         }
@@ -709,11 +719,11 @@ pub mod agent_casino {
         }
         acceptor_stats.total_games = acceptor_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).unwrap_or(acceptor_stats.pvp_games);
+        acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         if !challenger_won {
             acceptor_stats.total_won = acceptor_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
             acceptor_stats.wins += 1;
-            acceptor_stats.pvp_wins = acceptor_stats.pvp_wins.checked_add(1).unwrap_or(acceptor_stats.pvp_wins);
+            acceptor_stats.pvp_wins = acceptor_stats.pvp_wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
             acceptor_stats.losses += 1;
         }
@@ -1161,11 +1171,13 @@ pub mod agent_casino {
         // Compare project slugs (fixed-size arrays)
         require!(bet.predicted_project == market.winning_project, CasinoError::DidNotWin);
 
-        let gross_winnings = (bet.amount as u128)
+        let gross_128 = (bet.amount as u128)
             .checked_mul(market.total_pool as u128)
             .ok_or(CasinoError::MathOverflow)?
             .checked_div(winning_pool as u128)
-            .ok_or(CasinoError::MathOverflow)? as u64;
+            .ok_or(CasinoError::MathOverflow)?;
+        require!(gross_128 <= u64::MAX as u128, CasinoError::MathOverflow);
+        let gross_winnings = gross_128 as u64;
 
         // Calculate early bird discount factor (0-10000 basis points)
         // early_factor = (commit_deadline - committed_at) / (commit_deadline - created_at)
@@ -1174,11 +1186,13 @@ pub mod agent_casino {
 
         // Calculate early bird factor in basis points (0-10000)
         let early_factor_bps = if commit_duration > 0 {
-            ((time_until_deadline as u128) * 10000 / (commit_duration as u128)) as u64
+            let factor = ((time_until_deadline as u128) * 10000)
+                .checked_div(commit_duration as u128)
+                .unwrap_or(0);
+            (factor.min(10000)) as u64
         } else {
             0
         };
-        let early_factor_bps = early_factor_bps.min(10000); // Cap at 100%
 
         // Calculate effective fee with early bird discount
         // effective_fee_bps = house_edge_bps * (1 - early_factor)
@@ -1553,7 +1567,7 @@ pub mod agent_casino {
 
         // Update pool balance
         let pool = &mut ctx.accounts.memory_pool;
-        pool.pool_balance = pool.pool_balance.saturating_sub(refund);
+        pool.pool_balance = pool.pool_balance.checked_sub(refund).ok_or(CasinoError::MathOverflow)?;
 
         // Mark memory as inactive
         let memory = &mut ctx.accounts.memory;
@@ -1718,8 +1732,11 @@ pub mod agent_casino {
         if approved {
             // Pay hunter: bounty + their stake back, minus house edge
             let pool = &ctx.accounts.hit_pool;
-            let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
-            let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
+            let house_fee = ((hit.bounty as u128)
+                .checked_mul(pool.house_edge_bps as u128)
+                .ok_or(CasinoError::MathOverflow)?
+                / 10000) as u64;
+            let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)? + hit.hunter_stake;
 
             // Transfer from vault to hunter
             **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
@@ -1761,7 +1778,7 @@ pub mod agent_casino {
 
         // Return bounty minus 1% cancellation fee
         let cancel_fee = hit.bounty / 100;
-        let refund = hit.bounty.saturating_sub(cancel_fee);
+        let refund = hit.bounty.checked_sub(cancel_fee).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer from vault to poster
         **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= refund;
@@ -1791,7 +1808,7 @@ pub mod agent_casino {
 
         // Hunter loses stake to poster as compensation for wasted time
         let stake = hit.hunter_stake;
-        let former_hunter = hit.hunter.unwrap_or_default();
+        let former_hunter = hit.hunter.ok_or(CasinoError::HitNotClaimed)?;
 
         // Transfer forfeited stake to poster
         **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= stake;
@@ -1862,8 +1879,11 @@ pub mod agent_casino {
             if hunter_wins {
                 // Pay hunter: bounty + stake back minus house fee
                 let pool = &ctx.accounts.hit_pool;
-                let house_fee = (hit.bounty as u128 * pool.house_edge_bps as u128 / 10000) as u64;
-                let payout = hit.bounty.saturating_sub(house_fee) + hit.hunter_stake;
+                let house_fee = ((hit.bounty as u128)
+                    .checked_mul(pool.house_edge_bps as u128)
+                    .ok_or(CasinoError::MathOverflow)?
+                    / 10000) as u64;
+                let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)? + hit.hunter_stake;
 
                 **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
                 **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
@@ -2181,6 +2201,7 @@ pub mod agent_casino {
         vrf_request.game_type = GameType::CoinFlip;
         vrf_request.amount = amount;
         vrf_request.choice = choice;
+        vrf_request.target_multiplier = 0;
         vrf_request.status = VrfStatus::Pending;
         vrf_request.created_at = clock.unix_timestamp;
         vrf_request.settled_at = 0;
@@ -2262,6 +2283,410 @@ pub mod agent_casino {
         // Update VRF request
         let request_key = ctx.accounts.vrf_request.key();
         let player_key = ctx.accounts.vrf_request.player;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.status = VrfStatus::Settled;
+        vrf_request.settled_at = clock.unix_timestamp;
+        vrf_request.result = result;
+        vrf_request.payout = payout;
+
+        emit!(VrfRequestSettled {
+            request: request_key,
+            player: player_key,
+            randomness: randomness,
+            result,
+            payout,
+            won,
+        });
+
+        Ok(())
+    }
+
+    // === VRF Dice Roll ===
+
+    /// Request a VRF-based dice roll - bet is locked until randomness is fulfilled
+    pub fn vrf_dice_roll_request(
+        ctx: Context<VrfDiceRollRequest>,
+        amount: u64,
+        target: u8,
+    ) -> Result<()> {
+        require!(target >= 1 && target <= 5, CasinoError::InvalidTarget);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+
+        let multiplier = (600u64 / target as u64) as u16;
+        let max_payout = calculate_payout(amount, multiplier, house.house_edge_bps);
+        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
+
+        // Transfer bet to house
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        let clock = Clock::get()?;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.player = ctx.accounts.player.key();
+        vrf_request.house = ctx.accounts.house.key();
+        vrf_request.randomness_account = ctx.accounts.randomness_account.key();
+        vrf_request.game_type = GameType::DiceRoll;
+        vrf_request.amount = amount;
+        vrf_request.choice = target;
+        vrf_request.target_multiplier = 0;
+        vrf_request.status = VrfStatus::Pending;
+        vrf_request.created_at = clock.unix_timestamp;
+        vrf_request.settled_at = 0;
+        vrf_request.result = 0;
+        vrf_request.payout = 0;
+        vrf_request.bump = ctx.bumps.vrf_request;
+
+        let house = &mut ctx.accounts.house;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(VrfRequestCreated {
+            request: ctx.accounts.vrf_request.key(),
+            player: ctx.accounts.player.key(),
+            randomness_account: ctx.accounts.randomness_account.key(),
+            game_type: GameType::DiceRoll,
+            amount,
+            choice: target,
+        });
+
+        Ok(())
+    }
+
+    /// Settle a VRF dice roll using Switchboard randomness
+    pub fn vrf_dice_roll_settle(ctx: Context<VrfDiceRollSettle>) -> Result<()> {
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        let clock = Clock::get()?;
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        // Use 4 bytes for dice roll
+        let raw = u32::from_le_bytes([randomness[0], randomness[1], randomness[2], randomness[3]]);
+        let result = ((raw % 6) + 1) as u8;
+        let vrf_request = &ctx.accounts.vrf_request;
+        let won = result <= vrf_request.choice;
+
+        let house = &ctx.accounts.house;
+        let multiplier = (600u64 / vrf_request.choice as u64) as u16;
+        let payout = if won {
+            calculate_payout(vrf_request.amount, multiplier, house.house_edge_bps)
+        } else {
+            0
+        };
+
+        if won && payout > 0 {
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
+        }
+
+        let house = &mut ctx.accounts.house;
+        if won {
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+        } else {
+            house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        }
+
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = vrf_request.player;
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        let request_key = ctx.accounts.vrf_request.key();
+        let player_key = ctx.accounts.vrf_request.player;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.status = VrfStatus::Settled;
+        vrf_request.settled_at = clock.unix_timestamp;
+        vrf_request.result = result;
+        vrf_request.payout = payout;
+
+        emit!(VrfRequestSettled {
+            request: request_key,
+            player: player_key,
+            randomness: randomness,
+            result,
+            payout,
+            won,
+        });
+
+        Ok(())
+    }
+
+    // === VRF Limbo ===
+
+    /// Request a VRF-based limbo game
+    pub fn vrf_limbo_request(
+        ctx: Context<VrfLimboRequest>,
+        amount: u64,
+        target_multiplier: u16,
+    ) -> Result<()> {
+        require!(target_multiplier >= 101 && target_multiplier <= 10000, CasinoError::InvalidMultiplier);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+
+        let max_payout = (amount as u128)
+            .checked_mul(target_multiplier as u128)
+            .ok_or(CasinoError::MathOverflow)? / 100;
+        require!(max_payout <= house.pool as u128, CasinoError::InsufficientLiquidity);
+
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        let clock = Clock::get()?;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.player = ctx.accounts.player.key();
+        vrf_request.house = ctx.accounts.house.key();
+        vrf_request.randomness_account = ctx.accounts.randomness_account.key();
+        vrf_request.game_type = GameType::Limbo;
+        vrf_request.amount = amount;
+        vrf_request.choice = 0;
+        vrf_request.target_multiplier = target_multiplier;
+        vrf_request.status = VrfStatus::Pending;
+        vrf_request.created_at = clock.unix_timestamp;
+        vrf_request.settled_at = 0;
+        vrf_request.result = 0;
+        vrf_request.payout = 0;
+        vrf_request.bump = ctx.bumps.vrf_request;
+
+        let house = &mut ctx.accounts.house;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(VrfRequestCreated {
+            request: ctx.accounts.vrf_request.key(),
+            player: ctx.accounts.player.key(),
+            randomness_account: ctx.accounts.randomness_account.key(),
+            game_type: GameType::Limbo,
+            amount,
+            choice: 0,
+        });
+
+        Ok(())
+    }
+
+    /// Settle a VRF limbo game using Switchboard randomness
+    pub fn vrf_limbo_settle(ctx: Context<VrfLimboSettle>) -> Result<()> {
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        let clock = Clock::get()?;
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        let raw = u32::from_le_bytes([randomness[0], randomness[1], randomness[2], randomness[3]]);
+        let vrf_request = &ctx.accounts.vrf_request;
+        let house = &ctx.accounts.house;
+        let result_multiplier = calculate_limbo_result(raw, house.house_edge_bps);
+        let won = result_multiplier >= vrf_request.target_multiplier;
+
+        let payout = if won {
+            let p = (vrf_request.amount as u128)
+                .checked_mul(vrf_request.target_multiplier as u128)
+                .ok_or(CasinoError::MathOverflow)?
+                / 100;
+            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
+            p as u64
+        } else {
+            0
+        };
+
+        if won && payout > 0 {
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
+        }
+
+        let house = &mut ctx.accounts.house;
+        if won {
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+        } else {
+            house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        }
+
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = vrf_request.player;
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        let request_key = ctx.accounts.vrf_request.key();
+        let player_key = ctx.accounts.vrf_request.player;
+        let result = (result_multiplier / 100) as u8; // Store as integer part for result field
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.status = VrfStatus::Settled;
+        vrf_request.settled_at = clock.unix_timestamp;
+        vrf_request.result = result;
+        vrf_request.payout = payout;
+
+        emit!(VrfRequestSettled {
+            request: request_key,
+            player: player_key,
+            randomness: randomness,
+            result,
+            payout,
+            won,
+        });
+
+        Ok(())
+    }
+
+    // === VRF Crash ===
+
+    /// Request a VRF-based crash game
+    pub fn vrf_crash_request(
+        ctx: Context<VrfCrashRequest>,
+        amount: u64,
+        cashout_multiplier: u16,
+    ) -> Result<()> {
+        require!(cashout_multiplier >= 101 && cashout_multiplier <= 10000, CasinoError::InvalidMultiplier);
+
+        let house = &ctx.accounts.house;
+        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
+        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
+        require!(amount <= max_bet, CasinoError::BetTooLarge);
+
+        let max_payout = (amount as u128)
+            .checked_mul(cashout_multiplier as u128)
+            .ok_or(CasinoError::MathOverflow)? / 100;
+        require!(max_payout <= house.pool as u128, CasinoError::InsufficientLiquidity);
+
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.player.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, amount)?;
+
+        let clock = Clock::get()?;
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.player = ctx.accounts.player.key();
+        vrf_request.house = ctx.accounts.house.key();
+        vrf_request.randomness_account = ctx.accounts.randomness_account.key();
+        vrf_request.game_type = GameType::Crash;
+        vrf_request.amount = amount;
+        vrf_request.choice = 0;
+        vrf_request.target_multiplier = cashout_multiplier;
+        vrf_request.status = VrfStatus::Pending;
+        vrf_request.created_at = clock.unix_timestamp;
+        vrf_request.settled_at = 0;
+        vrf_request.result = 0;
+        vrf_request.payout = 0;
+        vrf_request.bump = ctx.bumps.vrf_request;
+
+        let house = &mut ctx.accounts.house;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(VrfRequestCreated {
+            request: ctx.accounts.vrf_request.key(),
+            player: ctx.accounts.player.key(),
+            randomness_account: ctx.accounts.randomness_account.key(),
+            game_type: GameType::Crash,
+            amount,
+            choice: 0,
+        });
+
+        Ok(())
+    }
+
+    /// Settle a VRF crash game using Switchboard randomness
+    pub fn vrf_crash_settle(ctx: Context<VrfCrashSettle>) -> Result<()> {
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        let clock = Clock::get()?;
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        let raw = u32::from_le_bytes([randomness[0], randomness[1], randomness[2], randomness[3]]);
+        let vrf_request = &ctx.accounts.vrf_request;
+        let house = &ctx.accounts.house;
+        let crash_point = calculate_crash_point(raw, house.house_edge_bps);
+        let won = crash_point >= vrf_request.target_multiplier;
+
+        let payout = if won {
+            let p = (vrf_request.amount as u128)
+                .checked_mul(vrf_request.target_multiplier as u128)
+                .ok_or(CasinoError::MathOverflow)?
+                / 100;
+            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
+            p as u64
+        } else {
+            0
+        };
+
+        if won && payout > 0 {
+            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
+            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
+        }
+
+        let house = &mut ctx.accounts.house;
+        if won {
+            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+        } else {
+            house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        }
+
+        let agent_stats = &mut ctx.accounts.agent_stats;
+        if agent_stats.agent == Pubkey::default() {
+            agent_stats.agent = vrf_request.player;
+            agent_stats.bump = ctx.bumps.agent_stats;
+        }
+        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+        if won {
+            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
+            agent_stats.wins += 1;
+        } else {
+            agent_stats.losses += 1;
+        }
+
+        let request_key = ctx.accounts.vrf_request.key();
+        let player_key = ctx.accounts.vrf_request.player;
+        let result = (crash_point / 100) as u8; // Store crash point integer part
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.status = VrfStatus::Settled;
         vrf_request.settled_at = clock.unix_timestamp;
@@ -2565,9 +2990,10 @@ fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 3
 }
 
 fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
-    let gross = (amount as u128 * multiplier as u128 / 100) as u64;
-    let edge = gross * house_edge_bps as u64 / 10000;
-    gross - edge
+    let gross_128 = (amount as u128) * (multiplier as u128) / 100;
+    let gross = if gross_128 > u64::MAX as u128 { u64::MAX } else { gross_128 as u64 };
+    let edge = (gross as u128 * house_edge_bps as u128 / 10000) as u64;
+    gross.saturating_sub(edge)
 }
 
 fn calculate_limbo_result(raw: u32, house_edge_bps: u16) -> u16 {
@@ -3212,7 +3638,11 @@ pub struct VerifyHit<'info> {
     pub hit_vault: UncheckedAccount<'info>,
 
     /// CHECK: Hunter account to receive payout - validated against hit
-    #[account(mut, constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter)]
+    #[account(
+        mut,
+        constraint = hit.hunter.is_some() @ CasinoError::HitNotClaimed,
+        constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter
+    )]
     pub hunter: AccountInfo<'info>,
 
     #[account(mut)]
@@ -3306,7 +3736,11 @@ pub struct ArbitrateHit<'info> {
     pub arbitration: Account<'info, Arbitration>,
 
     /// CHECK: Hunter account for potential payout - validated against hit
-    #[account(mut, constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter)]
+    #[account(
+        mut,
+        constraint = hit.hunter.is_some() @ CasinoError::HitNotClaimed,
+        constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter
+    )]
     pub hunter: AccountInfo<'info>,
 
     /// CHECK: Poster account for potential refund - validated against hit
@@ -3470,6 +3904,180 @@ pub struct VrfCoinFlipSettle<'info> {
         mut,
         seeds = [b"vrf_request", vrf_request.player.as_ref(), &house.total_games.saturating_sub(1).to_le_bytes()],
         bump = vrf_request.bump,
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    #[account(
+        init_if_needed,
+        payer = settler,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", vrf_request.player.as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    /// CHECK: Switchboard randomness account - validated against vrf_request
+    #[account(constraint = randomness_account.key() == vrf_request.randomness_account @ CasinoError::VrfInvalidRandomness)]
+    pub randomness_account: UncheckedAccount<'info>,
+
+    /// CHECK: Player to receive payout - validated against vrf_request
+    #[account(mut, constraint = player.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
+    pub player: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub settler: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+// === VRF Dice Roll Contexts ===
+
+#[derive(Accounts)]
+pub struct VrfDiceRollRequest<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = player,
+        space = 8 + VrfRequest::INIT_SPACE,
+        seeds = [b"vrf_dice", player.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Switchboard randomness account - validated in instruction
+    pub randomness_account: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VrfDiceRollSettle<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = vrf_request.game_type == GameType::DiceRoll @ CasinoError::VrfInvalidRandomness,
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    #[account(
+        init_if_needed,
+        payer = settler,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", vrf_request.player.as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    /// CHECK: Switchboard randomness account - validated against vrf_request
+    #[account(constraint = randomness_account.key() == vrf_request.randomness_account @ CasinoError::VrfInvalidRandomness)]
+    pub randomness_account: UncheckedAccount<'info>,
+
+    /// CHECK: Player to receive payout - validated against vrf_request
+    #[account(mut, constraint = player.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
+    pub player: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub settler: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+// === VRF Limbo Contexts ===
+
+#[derive(Accounts)]
+pub struct VrfLimboRequest<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = player,
+        space = 8 + VrfRequest::INIT_SPACE,
+        seeds = [b"vrf_limbo", player.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Switchboard randomness account - validated in instruction
+    pub randomness_account: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VrfLimboSettle<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = vrf_request.game_type == GameType::Limbo @ CasinoError::VrfInvalidRandomness,
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    #[account(
+        init_if_needed,
+        payer = settler,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", vrf_request.player.as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    /// CHECK: Switchboard randomness account - validated against vrf_request
+    #[account(constraint = randomness_account.key() == vrf_request.randomness_account @ CasinoError::VrfInvalidRandomness)]
+    pub randomness_account: UncheckedAccount<'info>,
+
+    /// CHECK: Player to receive payout - validated against vrf_request
+    #[account(mut, constraint = player.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
+    pub player: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub settler: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+// === VRF Crash Contexts ===
+
+#[derive(Accounts)]
+pub struct VrfCrashRequest<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = player,
+        space = 8 + VrfRequest::INIT_SPACE,
+        seeds = [b"vrf_crash", player.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Switchboard randomness account - validated in instruction
+    pub randomness_account: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VrfCrashSettle<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = vrf_request.game_type == GameType::Crash @ CasinoError::VrfInvalidRandomness,
         constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
     )]
     pub vrf_request: Account<'info, VrfRequest>,
@@ -3841,6 +4449,7 @@ pub struct VrfRequest {
     pub game_type: GameType,
     pub amount: u64,
     pub choice: u8,
+    pub target_multiplier: u16,  // For limbo/crash (101-10000), 0 for coinflip/dice
     pub status: VrfStatus,
     pub created_at: i64,
     pub settled_at: i64,
@@ -4527,4 +5136,9 @@ pub enum CasinoError {
     InvalidTakerAccount,
     #[msg("Arithmetic overflow")]
     MathOverflow,
+    // VRF game-specific errors
+    #[msg("Invalid dice target (must be 1-5)")]
+    InvalidTarget,
+    #[msg("Invalid multiplier (must be 101-10000)")]
+    InvalidMultiplier,
 }

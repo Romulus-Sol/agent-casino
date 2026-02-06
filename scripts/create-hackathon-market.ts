@@ -10,7 +10,6 @@ async function main() {
   // Load wallet
   // Load wallet (AgentWallet aware)
   const { keypair: walletKeypair } = loadWallet();
-  );
   console.log("Authority:", walletKeypair.publicKey.toString());
 
   // Connect to devnet

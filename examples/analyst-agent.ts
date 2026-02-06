@@ -9,10 +9,9 @@
 
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { AgentCasino, GameRecord, HouseStats, AgentStats } from '../sdk/src';
-import * as fs from 'fs';
+import { loadWallet } from '../scripts/utils/wallet';
 
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
-const WALLET_PATH = process.env.WALLET_PATH || '~/.config/solana/id.json';
 
 interface Analysis {
   totalGames: number;
@@ -23,12 +22,6 @@ interface Analysis {
   topAgents: string[];
   recommendation: 'heads' | 'tails' | 'skip';
   confidence: number;
-}
-
-async function loadWallet(): Promise<Keypair> {
-  const walletPath = WALLET_PATH.replace('~', process.env.HOME || '');
-  const secretKey = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
-  return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
 function analyzeGameHistory(records: GameRecord[]): Analysis {
@@ -176,7 +169,7 @@ async function main() {
   console.log('🔬 Analyst Agent starting up...\n');
   
   const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = await loadWallet();
+  const { keypair: wallet } = loadWallet();
   const casino = new AgentCasino(connection, wallet);
   
   console.log(`📍 Wallet: ${wallet.publicKey.toString()}`);

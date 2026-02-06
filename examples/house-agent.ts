@@ -9,10 +9,9 @@
 
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { AgentCasino, HouseStats } from '../sdk/src';
-import * as fs from 'fs';
+import { loadWallet } from '../scripts/utils/wallet';
 
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
-const WALLET_PATH = process.env.WALLET_PATH || '~/.config/solana/id.json';
 const LIQUIDITY_AMOUNT = 1.0; // SOL to provide
 const MONITOR_INTERVAL = 30000; // 30 seconds
 
@@ -23,12 +22,6 @@ interface LpMetrics {
   houseProfit: number;
   realizedEdge: number;
   gamesPlayed: number;
-}
-
-async function loadWallet(): Promise<Keypair> {
-  const walletPath = WALLET_PATH.replace('~', process.env.HOME || '');
-  const secretKey = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
-  return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
 function formatDuration(ms: number): string {
@@ -46,7 +39,7 @@ async function main() {
   console.log('This agent provides liquidity to the casino pool and monitors returns.\n');
   
   const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = await loadWallet();
+  const { keypair: wallet } = loadWallet();
   const casino = new AgentCasino(connection, wallet);
   
   console.log(`📍 Wallet: ${wallet.publicKey.toString()}`);

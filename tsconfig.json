@@ -15,6 +15,9 @@
     "strict": true,
     "outDir": "./dist"
   },
-  "include": ["tests/**/*", "examples/**/*"],
-  "exclude": ["node_modules", "dist", "sdk"]
+  "include": ["tests/**/*", "examples/**/*", "scripts/**/*", "sdk/src/**/*"],
+  "exclude": ["node_modules", "dist"],
+  "ts-node": {
+    "transpileOnly": true
+  }
 }

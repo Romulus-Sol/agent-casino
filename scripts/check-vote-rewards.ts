@@ -57,7 +57,7 @@ async function main() {
       headers: { Authorization: `Bearer ${apiKey}` },
     }
   );
-  const result = await response.json();
+  const result: any = await response.json();
   const comments = result.comments || [];
 
   console.log(`\n=== Vote Rewards Tracker ===`);

@@ -9,11 +9,10 @@
 
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { AgentCasino, CoinChoice, GameResult } from '../sdk/src';
-import * as fs from 'fs';
+import { loadWallet } from '../scripts/utils/wallet';
 
 // Configuration
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
-const WALLET_PATH = process.env.WALLET_PATH || '~/.config/solana/id.json';
 const INITIAL_BET = 0.01; // SOL
 const MAX_BET = 1.0; // SOL
 const SESSIONS = 10; // Number of betting sessions
@@ -26,12 +25,6 @@ interface AgentState {
   losses: number;
   streak: number; // negative for losses, positive for wins
   history: GameResult[];
-}
-
-async function loadWallet(): Promise<Keypair> {
-  const walletPath = WALLET_PATH.replace('~', process.env.HOME || '');
-  const secretKey = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
-  return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
 function chooseNext(state: AgentState): CoinChoice {
@@ -85,7 +78,7 @@ async function main() {
   
   // Setup
   const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = await loadWallet();
+  const { keypair: wallet } = loadWallet();
   const casino = new AgentCasino(connection, wallet);
   
   console.log(`📍 Wallet: ${wallet.publicKey.toString()}`);

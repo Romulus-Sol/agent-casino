@@ -74,7 +74,7 @@ export async function getAgentWalletBalances(): Promise<WalletBalance[] | null> 
         "Authorization": `Bearer ${config.apiToken}`
       }
     });
-    const data = await response.json();
+    const data: any = await response.json();
     return data.solana?.balances || [];
   } catch (e) {
     console.error("Failed to fetch balances:", e);
@@ -112,7 +112,7 @@ export async function transferSolana(
         })
       }
     );
-    const data = await response.json();
+    const data: any = await response.json();
 
     if (data.success) {
       return { success: true, signature: data.signature || data.txHash };
@@ -147,7 +147,7 @@ export async function signMessage(message: string): Promise<{ signature?: string
         })
       }
     );
-    const data = await response.json();
+    const data: any = await response.json();
     return { signature: data.signature };
   } catch (e: any) {
     return { error: e.message };

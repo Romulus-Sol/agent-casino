@@ -25,6 +25,7 @@ import {
   PublicKey,
   Keypair,
   Transaction,
+  VersionedTransaction,
   SystemProgram,
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
@@ -576,7 +577,7 @@ export class AgentCasino {
 
     try {
       const response = await fetch('https://wargames-api.vercel.app/live/betting-context');
-      const data = await response.json();
+      const data: any = await response.json();
 
       // Apply multiplier caps from config
       let multiplier = data.bet_multiplier || 1.0;
@@ -1289,11 +1290,12 @@ export class AgentCasino {
     return { agent, totalGames, totalWagered, totalWon, wins, losses };
   }
 
-  private parseGameType(type: number): 'CoinFlip' | 'DiceRoll' | 'Limbo' {
+  private parseGameType(type: number): 'CoinFlip' | 'DiceRoll' | 'Limbo' | 'Crash' {
     switch (type) {
       case 0: return 'CoinFlip';
       case 1: return 'DiceRoll';
       case 2: return 'Limbo';
+      case 3: return 'Crash';
       default: return 'CoinFlip';
     }
   }
@@ -1370,14 +1372,18 @@ class KeypairWallet implements Wallet {
     return this.payer.publicKey;
   }
 
-  async signTransaction<T extends Transaction>(tx: T): Promise<T> {
-    tx.partialSign(this.payer);
+  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+    if ('partialSign' in tx) {
+      tx.partialSign(this.payer);
+    }
     return tx;
   }
 
-  async signAllTransactions<T extends Transaction>(txs: T[]): Promise<T[]> {
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
     return txs.map((tx) => {
-      tx.partialSign(this.payer);
+      if ('partialSign' in tx) {
+        tx.partialSign(this.payer);
+      }
       return tx;
     });
   }

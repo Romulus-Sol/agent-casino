@@ -32,7 +32,7 @@ export interface Hit {
 export class HitmanMarket {
   private connection: Connection;
   private wallet: any;
-  private program: Program;
+  private program!: Program;
   private hitPoolPda: PublicKey;
   private hitVaultPda: PublicKey;
 

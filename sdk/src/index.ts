@@ -818,8 +818,15 @@ export class AgentCasino {
    */
   async swapAndCoinFlip(inputMint: string, tokenAmount: number, choice: CoinChoice): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
-    const result = await this.coinFlip(swap.solAmount, choice);
-    return { ...result, swap };
+    if (swap.mock) {
+      console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
+    }
+    try {
+      const result = await this.coinFlip(swap.solAmount, choice);
+      return { ...result, swap };
+    } catch (err: any) {
+      throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
+    }
   }
 
   /**
@@ -827,8 +834,15 @@ export class AgentCasino {
    */
   async swapAndDiceRoll(inputMint: string, tokenAmount: number, target: DiceTarget): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
-    const result = await this.diceRoll(swap.solAmount, target);
-    return { ...result, swap };
+    if (swap.mock) {
+      console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
+    }
+    try {
+      const result = await this.diceRoll(swap.solAmount, target);
+      return { ...result, swap };
+    } catch (err: any) {
+      throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
+    }
   }
 
   /**
@@ -836,8 +850,15 @@ export class AgentCasino {
    */
   async swapAndLimbo(inputMint: string, tokenAmount: number, targetMultiplier: number): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
-    const result = await this.limbo(swap.solAmount, targetMultiplier);
-    return { ...result, swap };
+    if (swap.mock) {
+      console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
+    }
+    try {
+      const result = await this.limbo(swap.solAmount, targetMultiplier);
+      return { ...result, swap };
+    } catch (err: any) {
+      throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
+    }
   }
 
   /**
@@ -845,8 +866,15 @@ export class AgentCasino {
    */
   async swapAndCrash(inputMint: string, tokenAmount: number, cashoutMultiplier: number): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
-    const result = await this.crash(swap.solAmount, cashoutMultiplier);
-    return { ...result, swap };
+    if (swap.mock) {
+      console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
+    }
+    try {
+      const result = await this.crash(swap.solAmount, cashoutMultiplier);
+      return { ...result, swap };
+    } catch (err: any) {
+      throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
+    }
   }
 
   private async jupiterSwap(inputMint: string, tokenAmount: number): Promise<JupiterSwapResult> {

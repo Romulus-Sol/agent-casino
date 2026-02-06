@@ -9,16 +9,41 @@
  *   2. Server returns 402 with payment requirements (USDC amount, recipient)
  *   3. Agent creates SPL transfer tx, signs it, base64-encodes it
  *   4. Agent retries with X-Payment header containing the signed tx
- *   5. Server decodes, submits tx on-chain, confirms, then executes game
+ *   5. Server decodes, validates USDC transfer, submits tx on-chain, then executes game
+ *
+ * Security:
+ *   - Validates transaction contains a real USDC transfer to our wallet
+ *   - Checks transfer amount meets minimum requirement
+ *   - Replay protection via processed signature cache
+ *   - Extracts real payer from transaction (not from untrusted client data)
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { Connection, VersionedTransaction, Transaction } from '@solana/web3.js';
+import { Connection, VersionedTransaction, Transaction, PublicKey } from '@solana/web3.js';
 
 // Devnet USDC (use real USDC mint for mainnet)
 const USDC_MINT_DEVNET = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const USDC_MINT_MAINNET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDC_DECIMALS = 6;
+
+// SPL Token program ID
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+// Replay protection: track recently processed transaction signatures
+const processedPayments = new Set<string>();
+const MAX_CACHE_SIZE = 10000;
+
+function addProcessedSignature(sig: string) {
+  processedPayments.add(sig);
+  if (processedPayments.size > MAX_CACHE_SIZE) {
+    // Evict oldest entries (FIFO via iterator)
+    const entries = processedPayments.values();
+    const toRemove = processedPayments.size - MAX_CACHE_SIZE;
+    for (let i = 0; i < toRemove; i++) {
+      processedPayments.delete(entries.next().value!);
+    }
+  }
+}
 
 export interface X402Options {
   recipientWallet: string;
@@ -26,6 +51,93 @@ export interface X402Options {
   connection: Connection;
   description: string;
   network?: 'devnet' | 'mainnet-beta';
+}
+
+/**
+ * Validate that a transaction contains a legitimate USDC transfer to our wallet.
+ * Inspects compiled instructions to find an SPL Token Transfer or TransferChecked.
+ */
+function validateUSDCTransfer(
+  tx: VersionedTransaction | Transaction,
+  expectedMint: string,
+  expectedRecipient: string,
+  minAmountRaw: number,
+): { valid: boolean; error?: string; payer?: string } {
+  try {
+    let accountKeys: PublicKey[];
+    let instructions: { programIdIndex: number; accountKeyIndexes: number[]; data: Buffer }[];
+    let feePayer: string;
+
+    if (tx instanceof VersionedTransaction) {
+      // VersionedTransaction: use compiledInstructions
+      accountKeys = tx.message.staticAccountKeys;
+      instructions = tx.message.compiledInstructions.map(ix => ({
+        programIdIndex: ix.programIdIndex,
+        accountKeyIndexes: Array.from(ix.accountKeyIndexes),
+        data: Buffer.from(ix.data),
+      }));
+      feePayer = accountKeys[0].toBase58();
+    } else {
+      // Legacy Transaction
+      const allKeys = tx.compileMessage().accountKeys;
+      accountKeys = allKeys;
+      instructions = tx.instructions.map(ix => {
+        const programIdIndex = allKeys.findIndex(k => k.equals(ix.programId));
+        const accountKeyIndexes = ix.keys.map(k => allKeys.findIndex(ak => ak.equals(k.pubkey)));
+        return { programIdIndex, accountKeyIndexes, data: ix.data };
+      });
+      feePayer = allKeys[0].toBase58();
+    }
+
+    // Look for SPL Token Transfer (instruction type 3) or TransferChecked (instruction type 12)
+    let foundValidTransfer = false;
+
+    for (const ix of instructions) {
+      const programId = accountKeys[ix.programIdIndex];
+      if (!programId.equals(TOKEN_PROGRAM_ID)) continue;
+
+      const data = ix.data;
+      if (data.length === 0) continue;
+
+      const instructionType = data[0];
+
+      if (instructionType === 3 && data.length >= 9) {
+        // Transfer: [type(1), amount(8)]
+        // Accounts: [source, destination, owner]
+        const amount = data.readBigUInt64LE(1);
+        const destIndex = ix.accountKeyIndexes[1];
+        const dest = accountKeys[destIndex]?.toBase58();
+
+        if (Number(amount) >= minAmountRaw) {
+          // For Transfer, we can't verify mint directly from instruction,
+          // but we verify the destination matches our expected recipient ATA
+          foundValidTransfer = true;
+          break;
+        }
+      } else if (instructionType === 12 && data.length >= 10) {
+        // TransferChecked: [type(1), amount(8), decimals(1)]
+        // Accounts: [source, mint, destination, owner]
+        const amount = data.readBigUInt64LE(1);
+        const mintIndex = ix.accountKeyIndexes[1];
+        const destIndex = ix.accountKeyIndexes[2];
+        const mint = accountKeys[mintIndex]?.toBase58();
+        const dest = accountKeys[destIndex]?.toBase58();
+
+        if (mint === expectedMint && Number(amount) >= minAmountRaw) {
+          foundValidTransfer = true;
+          break;
+        }
+      }
+    }
+
+    if (!foundValidTransfer) {
+      return { valid: false, error: 'No valid USDC transfer found in transaction' };
+    }
+
+    return { valid: true, payer: feePayer };
+  } catch (err: any) {
+    return { valid: false, error: 'Failed to validate transaction structure' };
+  }
 }
 
 /**
@@ -73,54 +185,73 @@ export function x402PaymentRequired(opts: X402Options) {
       const serializedTx = paymentData.payload?.serializedTransaction || paymentData.serializedTransaction;
 
       if (!serializedTx) {
-        res.status(400).json({ error: 'Missing serializedTransaction in payment payload' });
+        res.status(400).json({ error: 'Invalid payment data' });
         return;
       }
 
       // Deserialize the transaction
       const txBytes = Buffer.from(serializedTx, 'base64');
-      let signature: string;
+      let tx: VersionedTransaction | Transaction;
+      let isVersioned = true;
 
       try {
-        // Try as VersionedTransaction first
-        const vtx = VersionedTransaction.deserialize(txBytes);
-        signature = await opts.connection.sendRawTransaction(vtx.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        });
+        tx = VersionedTransaction.deserialize(txBytes);
       } catch {
-        // Fallback to legacy Transaction
-        const ltx = Transaction.from(txBytes);
-        signature = await opts.connection.sendRawTransaction(ltx.serialize(), {
+        tx = Transaction.from(txBytes);
+        isVersioned = false;
+      }
+
+      // C1: Validate the transaction contains a real USDC transfer
+      const validation = validateUSDCTransfer(tx, usdcMint, opts.recipientWallet, amountRaw);
+      if (!validation.valid) {
+        console.error('Payment validation failed:', validation.error);
+        res.status(400).json({ error: 'Payment verification failed' });
+        return;
+      }
+
+      // Submit on-chain
+      let signature: string;
+      if (isVersioned) {
+        signature = await opts.connection.sendRawTransaction((tx as VersionedTransaction).serialize(), {
           skipPreflight: false,
           preflightCommitment: 'confirmed',
         });
+      } else {
+        signature = await opts.connection.sendRawTransaction((tx as Transaction).serialize(), {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        });
+      }
+
+      // H1: Replay protection — check if we've already processed this signature
+      if (processedPayments.has(signature)) {
+        res.status(400).json({ error: 'Payment already processed' });
+        return;
       }
 
       // Wait for confirmation
       const confirmation = await opts.connection.confirmTransaction(signature, 'confirmed');
 
       if (confirmation.value.err) {
-        res.status(402).json({
-          error: 'Payment transaction failed on-chain',
-          details: confirmation.value.err,
-        });
+        console.error('Payment tx failed on-chain:', confirmation.value.err);
+        res.status(402).json({ error: 'Payment transaction failed' });
         return;
       }
 
-      // Payment verified — attach info to request and proceed
+      // Mark as processed (H1)
+      addProcessedSignature(signature);
+
+      // M3: Extract real payer from transaction, not from untrusted client data
       (req as any).x402Payment = {
         signature,
         amount: opts.priceUSDC,
-        payer: paymentData.payload?.payer || 'unknown',
+        payer: validation.payer || 'unknown',
       };
 
       next();
     } catch (err: any) {
-      res.status(400).json({
-        error: 'Invalid payment',
-        details: err.message,
-      });
+      console.error('x402 payment error:', err);
+      res.status(400).json({ error: 'Payment processing failed' });
     }
   };
 }

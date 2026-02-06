@@ -19,6 +19,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { AgentCasino } from '../sdk/src';
 import { x402PaymentRequired } from './x402-middleware';
@@ -33,8 +34,27 @@ const BET_SOL = parseFloat(process.env.BET_SOL || '0.001');
 const PRICE_USDC = parseFloat(process.env.PRICE_USDC || '0.01');
 
 const app = express();
+
+// CORS: intentionally open — this is a public API for any agent to use
 app.use(cors());
 app.use(express.json());
+
+// H2: Rate limiting
+const freeLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, try again later' },
+});
+
+const gameLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, try again later' },
+});
 
 // Initialize casino
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -49,7 +69,7 @@ console.log(`Price: ${PRICE_USDC} USDC per game`);
 
 // === Free Endpoints ===
 
-app.get('/v1/health', (_req, res) => {
+app.get('/v1/health', freeLimiter, (_req, res) => {
   res.json({
     status: 'ok',
     wallet: walletAddress,
@@ -61,12 +81,13 @@ app.get('/v1/health', (_req, res) => {
   });
 });
 
-app.get('/v1/stats', async (_req, res) => {
+app.get('/v1/stats', freeLimiter, async (_req, res) => {
   try {
     const stats = await casino.getHouseStats();
     res.json(stats);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('Stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
@@ -80,9 +101,10 @@ const paymentOpts = (game: string) => ({
   network: NETWORK,
 });
 
-// === Paid Endpoints ===
+// === Paid Endpoints (GET follows x402 protocol convention where payment header gates the request) ===
 
 app.get('/v1/games/coinflip',
+  gameLimiter,
   x402PaymentRequired(paymentOpts('coin flip')),
   async (req, res) => {
     const choice = (req.query.choice as string) === 'tails' ? 'tails' : 'heads';
@@ -100,12 +122,14 @@ app.get('/v1/games/coinflip',
         paymentTx: (req as any).x402Payment?.signature,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('Coinflip error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
     }
   }
 );
 
 app.get('/v1/games/diceroll',
+  gameLimiter,
   x402PaymentRequired(paymentOpts('dice roll')),
   async (req, res) => {
     const target = Math.min(5, Math.max(1, parseInt(req.query.target as string) || 3));
@@ -122,12 +146,14 @@ app.get('/v1/games/diceroll',
         paymentTx: (req as any).x402Payment?.signature,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('Diceroll error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
     }
   }
 );
 
 app.get('/v1/games/limbo',
+  gameLimiter,
   x402PaymentRequired(paymentOpts('limbo')),
   async (req, res) => {
     const multiplier = Math.min(100, Math.max(1.01, parseFloat(req.query.multiplier as string) || 2.0));
@@ -144,12 +170,14 @@ app.get('/v1/games/limbo',
         paymentTx: (req as any).x402Payment?.signature,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('Limbo error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
     }
   }
 );
 
 app.get('/v1/games/crash',
+  gameLimiter,
   x402PaymentRequired(paymentOpts('crash')),
   async (req, res) => {
     const multiplier = Math.min(100, Math.max(1.01, parseFloat(req.query.multiplier as string) || 1.5));
@@ -166,7 +194,8 @@ app.get('/v1/games/crash',
         paymentTx: (req as any).x402Payment?.signature,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('Crash error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
     }
   }
 );
@@ -176,11 +205,11 @@ app.get('/v1/games/crash',
 app.listen(PORT, () => {
   console.log(`\nAgent Casino x402 API running on http://localhost:${PORT}`);
   console.log(`\nEndpoints:`);
-  console.log(`  GET /v1/health                    (free)`);
-  console.log(`  GET /v1/stats                     (free)`);
-  console.log(`  GET /v1/games/coinflip?choice=     (x402: ${PRICE_USDC} USDC)`);
-  console.log(`  GET /v1/games/diceroll?target=      (x402: ${PRICE_USDC} USDC)`);
-  console.log(`  GET /v1/games/limbo?multiplier=     (x402: ${PRICE_USDC} USDC)`);
-  console.log(`  GET /v1/games/crash?multiplier=     (x402: ${PRICE_USDC} USDC)`);
+  console.log(`  GET /v1/health                    (free, 60/min)`);
+  console.log(`  GET /v1/stats                     (free, 60/min)`);
+  console.log(`  GET /v1/games/coinflip?choice=     (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/diceroll?target=      (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/limbo?multiplier=     (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/crash?multiplier=     (x402: ${PRICE_USDC} USDC, 10/min)`);
   console.log(`\nTest: curl http://localhost:${PORT}/v1/health`);
 });

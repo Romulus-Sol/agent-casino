@@ -144,7 +144,8 @@ curl http://localhost:3402/v1/games/coinflip?choice=heads
 | **Framework** | Anchor 0.30.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 74+ |
+| **Games Played** | 78+ |
+| **Tests** | 34 passing |
 
 ## Links
 

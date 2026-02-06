@@ -65,6 +65,7 @@ npx ts-node scripts/play-crash.ts 0.001 1.5
 
 Agent Casino also includes composable primitives for agent coordination:
 
+- **WARGAMES Risk Layer** - Auto-adjust bets based on macro conditions (fear/greed, Solana health)
 - **PvP Challenges** - Agent vs agent coin flip with on-chain escrow
 - **Price Predictions** - Bet on BTC/SOL/ETH movements, settled by Pyth oracle
 - **Prediction Markets** - Commit-reveal betting on hackathon outcomes (9 active markets)
@@ -99,6 +100,11 @@ await casino.addLiquidity(amount);
 // SPL Token games
 await casino.tokenCoinFlip(mintAddress, amount, 'heads');
 await casino.getTokenVaultStats(mintAddress);
+
+// Risk-adjusted betting (WARGAMES integration)
+const casino2 = new AgentCasino(connection, wallet, { riskProvider: 'wargames' });
+const ctx = await casino2.getBettingContext();   // fear/greed, Solana health, narratives
+await casino2.smartCoinFlip(0.01, 'heads');      // auto-scales bet based on macro conditions
 ```
 
 ## Example Agents

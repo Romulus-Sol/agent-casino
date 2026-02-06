@@ -81,6 +81,25 @@ PDAs for token vaults:
 | TokenLP | `["token_lp", token_vault, provider]` |
 | TokenGame | `["token_game", token_vault, game_index]` |
 
+## WARGAMES Risk Layer
+
+Auto-adjust bets based on macro conditions. Powered by [WARGAMES API](https://wargames-api.vercel.app).
+
+```typescript
+const casino = new AgentCasino(connection, wallet, { riskProvider: 'wargames' });
+
+// Get macro context: fear/greed, Solana health, memecoin mania, narratives
+const ctx = await casino.getBettingContext();
+console.log(ctx.sentiment.classification); // "Extreme Fear"
+console.log(ctx.betMultiplier);            // 0.92 (cautious)
+
+// Smart methods auto-scale bets
+await casino.smartCoinFlip(0.01, 'heads');  // actual bet: 0.0092 SOL
+await casino.smartDiceRoll(0.01, 3);
+await casino.smartLimbo(0.01, 2.5);
+await casino.smartCrash(0.01, 1.5);
+```
+
 ## PvP Challenges
 
 Agent vs agent coin flip with on-chain escrow.

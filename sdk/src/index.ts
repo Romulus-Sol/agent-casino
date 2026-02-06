@@ -50,9 +50,13 @@ export interface CasinoConfig {
 export interface BettingContext {
   betMultiplier: number;
   riskScore: number;
+  bias: string;
   recommendation: string;
+  signals: string[];
   warnings: string[];
-  memecoinMania: string;
+  sentiment: { fearGreedValue: number; classification: string };
+  memecoinMania: { score: number; trend: string };
+  solanaHealthy: boolean;
   timestamp: number;
 }
 
@@ -595,29 +599,54 @@ export class AgentCasino {
       return {
         betMultiplier: 1.0,
         riskScore: 50,
+        bias: 'neutral',
         recommendation: 'Risk provider not configured',
+        signals: [],
         warnings: [],
-        memecoinMania: 'unknown',
+        sentiment: { fearGreedValue: 50, classification: 'unknown' },
+        memecoinMania: { score: 50, trend: 'stable' },
+        solanaHealthy: true,
         timestamp: Date.now(),
       };
     }
 
     try {
-      const response = await fetch('https://wargames-api.vercel.app/live/betting-context');
-      const data: any = await response.json();
+      // Fetch betting context and Solana health in parallel
+      const [ctxRes, solRes] = await Promise.all([
+        fetch('https://wargames-api.vercel.app/live/betting-context'),
+        fetch('https://wargames-api.vercel.app/live/solana'),
+      ]);
+      const ctx: any = await ctxRes.json();
+      const sol: any = await solRes.json();
 
       // Apply multiplier caps from config
-      let multiplier = data.bet_multiplier || 1.0;
+      let multiplier = ctx.bet_multiplier || 1.0;
       const maxMult = this.config.maxRiskMultiplier || 2.0;
       const minMult = this.config.minRiskMultiplier || 0.3;
       multiplier = Math.max(minMult, Math.min(maxMult, multiplier));
 
+      // Gate on Solana network health
+      const solanaHealthy = sol.recommendations?.execute_transactions !== false;
+      if (!solanaHealthy) {
+        multiplier = minMult; // Minimum bet if network is unhealthy
+      }
+
       this.cachedBettingContext = {
         betMultiplier: multiplier,
-        riskScore: data.risk_score || 50,
-        recommendation: data.recommendation || 'No recommendation',
-        warnings: data.signals?.warnings || [],
-        memecoinMania: data.signals?.memecoin_mania || 'unknown',
+        riskScore: ctx.risk_score || 50,
+        bias: ctx.bias || 'neutral',
+        recommendation: ctx.recommendation || 'No recommendation',
+        signals: ctx.signals || [],
+        warnings: ctx.warnings || [],
+        sentiment: {
+          fearGreedValue: ctx.sentiment?.fear_greed_value ?? 50,
+          classification: ctx.sentiment?.classification || 'unknown',
+        },
+        memecoinMania: {
+          score: ctx.narratives?.memecoin_mania?.score ?? 50,
+          trend: ctx.narratives?.memecoin_mania?.trend || 'stable',
+        },
+        solanaHealthy,
         timestamp: Date.now(),
       };
       this.contextCacheTime = Date.now();
@@ -628,9 +657,13 @@ export class AgentCasino {
       return {
         betMultiplier: 1.0,
         riskScore: 50,
+        bias: 'neutral',
         recommendation: 'WARGAMES API unavailable - using neutral settings',
+        signals: [],
         warnings: ['api_unavailable'],
-        memecoinMania: 'unknown',
+        sentiment: { fearGreedValue: 50, classification: 'unknown' },
+        memecoinMania: { score: 50, trend: 'stable' },
+        solanaHealthy: true,
         timestamp: Date.now(),
       };
     }
@@ -683,6 +716,18 @@ export class AgentCasino {
       return { ...result, riskContext: context };
     }
     return this.limbo(baseBetSol, targetMultiplier);
+  }
+
+  /**
+   * Crash with automatic risk adjustment
+   */
+  async smartCrash(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
+    if (this.config.riskProvider === 'wargames') {
+      const { adjustedBet, context } = await this.getRiskAdjustedBet(baseBetSol);
+      const result = await this.crash(adjustedBet, targetMultiplier);
+      return { ...result, riskContext: context };
+    }
+    return this.crash(baseBetSol, targetMultiplier);
   }
 
   // === Verification Methods ===

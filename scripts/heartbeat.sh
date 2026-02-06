@@ -10,21 +10,20 @@ source "/root/Solana Hackathon/.env"
 API_BASE="https://agents.colosseum.com/api"
 LOG_FILE="/root/Solana Hackathon/agent-casino/heartbeat.log"
 
-# Our post IDs to monitor (updated Feb 4)
-# Key posts: prediction markets, hitman market, confession, price predictions
-POST_IDS=(765 762 817 841 976)
+# Our post IDs to monitor (all 37 posts, updated Feb 6)
+POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659)
 
 log() {
-    echo "[$(date -Iseconds)] $1" | tee -a "$LOG_FILE"
+    echo "[$(date -Iseconds)] $1" >> "$LOG_FILE"
 }
 
 log "=== HEARTBEAT START ==="
 
-# 0. Check skill.md version (should be 1.5.2 as of Feb 4)
+# 0. Check skill.md version (should be 1.6.0 as of Feb 6)
 log "Checking skill.md version..."
 SKILL_VERSION=$(curl -s https://colosseum.com/skill.md | head -20 | grep -o "version.*[0-9]\.[0-9]\.[0-9]" | head -1 || echo "unknown")
 log "Skill version: $SKILL_VERSION"
-if [[ "$SKILL_VERSION" != *"1.5.2"* ]] && [[ "$SKILL_VERSION" != "unknown" ]]; then
+if [[ "$SKILL_VERSION" != *"1.6.0"* ]] && [[ "$SKILL_VERSION" != "unknown" ]]; then
     log "WARNING: Skill version may have changed! Re-fetch full skill.md"
 fi
 
@@ -62,12 +61,12 @@ log "Recent posts fetched: $RECENT_COUNT"
 
 # 4. Check leaderboard position
 log "Checking leaderboard..."
-LEADERBOARD=$(curl -s -H "Authorization: Bearer $COLOSSEUM_API_KEY" "$API_BASE/leaderboard?limit=50" 2>/dev/null)
-if echo "$LEADERBOARD" | jq -e '.projects' > /dev/null 2>&1; then
-    OUR_RANK=$(echo "$LEADERBOARD" | jq -r '.projects[] | select(.slug == "agent-casino-protocol") | .rank // "not in top 50"')
-    log "Our leaderboard rank: ${OUR_RANK:-not found}"
+LEADERBOARD=$(curl -s -H "Authorization: Bearer $COLOSSEUM_API_KEY" "$API_BASE/leaderboard?limit=100" 2>/dev/null)
+OUR_ENTRY=$(echo "$LEADERBOARD" | jq -r '.entries[]? | select(.project.name == "agent-casino-protocol") | "rank \(.rank), human: \(.project.humanUpvotes), agent: \(.project.agentUpvotes)"' 2>/dev/null)
+if [ -n "$OUR_ENTRY" ]; then
+    log "Leaderboard: $OUR_ENTRY"
 else
-    log "Leaderboard: Could not fetch or parse"
+    log "Leaderboard: not in top 100 or could not parse"
 fi
 
 # 5. Check prediction market status

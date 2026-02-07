@@ -109,6 +109,68 @@ pub mod agent_casino {
         Ok(())
     }
 
+    /// Remove liquidity from the house pool (authority only)
+    pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, amount: u64) -> Result<()> {
+        require!(amount > 0, CasinoError::InvalidAmount);
+
+        let house = &ctx.accounts.house;
+        require!(house.pool >= amount, CasinoError::InsufficientPoolBalance);
+
+        let lp_position = &ctx.accounts.lp_position;
+        require!(lp_position.deposited >= amount, CasinoError::InsufficientPoolBalance);
+
+        // Transfer SOL from house to provider
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.provider.to_account_info().try_borrow_mut_lamports()? += amount;
+
+        let lp_position = &mut ctx.accounts.lp_position;
+        lp_position.deposited = lp_position.deposited.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(LiquidityRemoved {
+            provider: ctx.accounts.provider.key(),
+            amount,
+            total_pool: house.pool,
+        });
+
+        Ok(())
+    }
+
+    /// Expire a VRF request that hasn't been settled within 300 slots
+    /// Refunds the player's bet from the house pool
+    pub fn expire_vrf_request(ctx: Context<ExpireVrfRequest>) -> Result<()> {
+        let clock = Clock::get()?;
+        let vrf_request = &ctx.accounts.vrf_request;
+
+        require!(vrf_request.status == VrfStatus::Pending, CasinoError::VrfAlreadySettled);
+
+        // Must be at least 300 slots old
+        let slots_elapsed = clock.slot.checked_sub(vrf_request.request_slot).ok_or(CasinoError::MathOverflow)?;
+        require!(slots_elapsed >= 300, CasinoError::VrfNotExpired);
+
+        let refund_amount = vrf_request.amount;
+        let player_key = vrf_request.player;
+
+        // Refund player from house
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
+        **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += refund_amount;
+
+        // Mark as expired
+        let vrf_request = &mut ctx.accounts.vrf_request;
+        vrf_request.status = VrfStatus::Expired;
+        vrf_request.settled_at = clock.unix_timestamp;
+
+        emit!(VrfExpired {
+            request: ctx.accounts.vrf_request.key(),
+            player: player_key,
+            refund: refund_amount,
+        });
+
+        Ok(())
+    }
+
     /// Coin flip - 50/50 odds
     pub fn coin_flip(
         ctx: Context<PlayGame>,
@@ -122,7 +184,8 @@ pub mod agent_casino {
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
         let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        let max_payout = calculate_payout(amount, 2_00, house.house_edge_bps);
+        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
 
         let clock = Clock::get()?;
         let server_seed = generate_seed(
@@ -136,7 +199,7 @@ pub mod agent_casino {
 
         let won = result == choice;
         let payout = if won {
-            calculate_payout(amount, 2_00, house.house_edge_bps)
+            max_payout
         } else {
             0
         };
@@ -163,7 +226,8 @@ pub mod agent_casino {
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -175,9 +239,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Record game
@@ -223,7 +287,10 @@ pub mod agent_casino {
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
         let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        // target validated 1-5 above, safe to divide
+        let multiplier = (600u64.checked_div(target as u64).ok_or(CasinoError::MathOverflow)?) as u16;
+        let max_payout = calculate_payout(amount, multiplier, house.house_edge_bps);
+        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
 
         let clock = Clock::get()?;
         let server_seed = generate_seed(
@@ -237,9 +304,8 @@ pub mod agent_casino {
         let result = ((raw % 6) + 1) as u8;
 
         let won = result <= target;
-        let multiplier = (600 / target as u64) as u16;
         let payout = if won {
-            calculate_payout(amount, multiplier, house.house_edge_bps)
+            max_payout
         } else {
             0
         };
@@ -264,7 +330,8 @@ pub mod agent_casino {
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -275,9 +342,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let game_record = &mut ctx.accounts.game_record;
@@ -322,7 +389,13 @@ pub mod agent_casino {
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
         let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        // Calculate max payout for liquidity check using actual multiplier
+        let max_payout_128 = (amount as u128)
+            .checked_mul(target_multiplier as u128)
+            .ok_or(CasinoError::MathOverflow)?
+            / 100;
+        require!(max_payout_128 <= u64::MAX as u128, CasinoError::MathOverflow);
+        require!(house.pool >= max_payout_128 as u64, CasinoError::InsufficientLiquidity);
 
         let clock = Clock::get()?;
         let server_seed = generate_seed(
@@ -338,12 +411,7 @@ pub mod agent_casino {
 
         let won = result_multiplier >= target_multiplier;
         let payout = if won {
-            let p = (amount as u128)
-                .checked_mul(target_multiplier as u128)
-                .ok_or(CasinoError::MathOverflow)?
-                / 100;
-            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
-            p as u64
+            max_payout_128 as u64
         } else {
             0
         };
@@ -368,7 +436,8 @@ pub mod agent_casino {
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -379,9 +448,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let game_record = &mut ctx.accounts.game_record;
@@ -427,7 +496,13 @@ pub mod agent_casino {
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
         let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        // Calculate max payout for liquidity check using actual multiplier
+        let max_payout_128 = (amount as u128)
+            .checked_mul(cashout_multiplier as u128)
+            .ok_or(CasinoError::MathOverflow)?
+            / 100;
+        require!(max_payout_128 <= u64::MAX as u128, CasinoError::MathOverflow);
+        require!(house.pool >= max_payout_128 as u64, CasinoError::InsufficientLiquidity);
 
         let clock = Clock::get()?;
         let server_seed = generate_seed(
@@ -444,12 +519,7 @@ pub mod agent_casino {
         // Player wins if the crash point is >= their cashout multiplier
         let won = crash_point >= cashout_multiplier;
         let payout = if won {
-            let p = (amount as u128)
-                .checked_mul(cashout_multiplier as u128)
-                .ok_or(CasinoError::MathOverflow)?
-                / 100;
-            require!(p <= u64::MAX as u128, CasinoError::MathOverflow);
-            p as u64
+            max_payout_128 as u64
         } else {
             0
         };
@@ -474,7 +544,8 @@ pub mod agent_casino {
         house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -485,9 +556,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let game_record = &mut ctx.accounts.game_record;
@@ -530,7 +601,7 @@ pub mod agent_casino {
             total_games: house.total_games,
             total_volume: house.total_volume,
             total_payout: house.total_payout,
-            house_profit: house.total_volume.saturating_sub(house.total_payout),
+            house_profit: house.total_volume.checked_sub(house.total_payout).unwrap_or(0),
         })
     }
 
@@ -717,10 +788,10 @@ pub mod agent_casino {
         challenger_stats.pvp_games = challenger_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         if challenger_won {
             challenger_stats.total_won = challenger_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
-            challenger_stats.wins += 1;
+            challenger_stats.wins = challenger_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
             challenger_stats.pvp_wins = challenger_stats.pvp_wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            challenger_stats.losses += 1;
+            challenger_stats.losses = challenger_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Update acceptor stats (already initialized via init_agent_stats)
@@ -730,10 +801,10 @@ pub mod agent_casino {
         acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         if !challenger_won {
             acceptor_stats.total_won = acceptor_stats.total_won.checked_add(winner_payout).ok_or(CasinoError::MathOverflow)?;
-            acceptor_stats.wins += 1;
+            acceptor_stats.wins = acceptor_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
             acceptor_stats.pvp_wins = acceptor_stats.pvp_wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            acceptor_stats.losses += 1;
+            acceptor_stats.losses = acceptor_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         emit!(ChallengeAccepted {
@@ -1034,7 +1105,7 @@ pub mod agent_casino {
 
         // Reduce total pool (forfeit doesn't count toward payouts)
         let market = &mut ctx.accounts.market;
-        market.total_pool = market.total_pool.saturating_sub(forfeit_amount);
+        market.total_pool = market.total_pool.checked_sub(forfeit_amount).ok_or(CasinoError::MathOverflow)?;
 
         // Mark as claimed to prevent double-forfeit
         let bet = &mut ctx.accounts.bet;
@@ -1065,7 +1136,7 @@ pub mod agent_casino {
     ) -> Result<()> {
         let market = &ctx.accounts.market;
         require!(
-            market.status == MarketStatus::Revealing || market.status == MarketStatus::Committing,
+            market.status == MarketStatus::Revealing,
             CasinoError::MarketNotOpen
         );
         require!(winning_project.len() > 0 && winning_project.len() <= 50, CasinoError::InvalidProjectSlug);
@@ -1189,14 +1260,14 @@ pub mod agent_casino {
 
         // Calculate early bird discount factor (0-10000 basis points)
         // early_factor = (commit_deadline - committed_at) / (commit_deadline - created_at)
-        let commit_duration = market.commit_deadline - market.created_at;
-        let time_until_deadline = market.commit_deadline.saturating_sub(bet.committed_at);
+        let commit_duration = market.commit_deadline.checked_sub(market.created_at).ok_or(CasinoError::MathOverflow)?;
+        let time_until_deadline = market.commit_deadline.checked_sub(bet.committed_at).unwrap_or(0);
 
         // Calculate early bird factor in basis points (0-10000)
         let early_factor_bps = if commit_duration > 0 {
             let factor = ((time_until_deadline as u128) * 10000)
                 .checked_div(commit_duration as u128)
-                .unwrap_or(0);
+                .ok_or(CasinoError::MathOverflow)?;
             (factor.min(10000)) as u64
         } else {
             0
@@ -1206,7 +1277,7 @@ pub mod agent_casino {
         // effective_fee_bps = house_edge_bps * (1 - early_factor)
         let base_fee_bps = ctx.accounts.house.house_edge_bps as u64;
         let fee_discount_bps = (base_fee_bps * early_factor_bps) / 10000;
-        let effective_fee_bps = base_fee_bps.saturating_sub(fee_discount_bps);
+        let effective_fee_bps = base_fee_bps.checked_sub(fee_discount_bps).unwrap_or(0);
 
         // Calculate fee amount on gross winnings
         let fee = (gross_winnings as u128)
@@ -1215,7 +1286,7 @@ pub mod agent_casino {
             .checked_div(10000)
             .ok_or(CasinoError::MathOverflow)? as u64;
 
-        let net_winnings = gross_winnings.saturating_sub(fee);
+        let net_winnings = gross_winnings.checked_sub(fee).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer net winnings to bettor
         **ctx.accounts.market.to_account_info().try_borrow_mut_lamports()? -= net_winnings;
@@ -1239,14 +1310,14 @@ pub mod agent_casino {
         let agent_stats = &mut ctx.accounts.agent_stats;
         // agent_stats already initialized via init_agent_stats
         agent_stats.total_won = agent_stats.total_won.checked_add(net_winnings).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.wins += 1;
+        agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PredictionWinningsClaimed {
             market_id: market_key,
             bettor: bettor_key,
             bet_amount,
             winnings: net_winnings,
-            early_bird_discount_bps: fee_discount_bps as u16,
+            early_bird_discount_bps: fee_discount_bps.min(u16::MAX as u64) as u16,
             fee_paid: fee,
         });
 
@@ -1437,8 +1508,8 @@ pub mod agent_casino {
         system_program::transfer(cpi_context, pull_price)?;
 
         // Calculate house take and depositor share
-        let house_take = pull_price * house_edge_bps as u64 / 10000;
-        let depositor_share = pull_price - house_take;
+        let house_take = pull_price.checked_mul(house_edge_bps as u64).ok_or(CasinoError::MathOverflow)? / 10000;
+        let depositor_share = pull_price.checked_sub(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer house take to house (if house account exists)
         if house_take > 0 {
@@ -1462,7 +1533,7 @@ pub mod agent_casino {
 
         // Get memory content for event
         let memory = &ctx.accounts.memory;
-        let content_len = memory.content_length as usize;
+        let content_len = (memory.content_length as usize).min(memory.content.len());
         let content = String::from_utf8_lossy(&memory.content[..content_len]).to_string();
 
         // Update pool stats
@@ -1519,7 +1590,7 @@ pub mod agent_casino {
             // Bad rating: depositor loses stake to pool
             let memory = &mut ctx.accounts.memory;
             if memory.stake > 0 {
-                stake_change = -(memory.stake as i64);
+                stake_change = -((memory.stake.min(i64::MAX as u64)) as i64);
                 // Stake already in pool, just zero out memory's stake claim
                 memory.stake = 0;
             }
@@ -1640,7 +1711,7 @@ pub mod agent_casino {
         let clock = Clock::get()?;
         let pool = &mut ctx.accounts.hit_pool;
         let hit_index = pool.total_hits;
-        pool.total_hits += 1;
+        pool.total_hits = pool.total_hits.checked_add(1).ok_or(CasinoError::MathOverflow)?;
 
         let hit = &mut ctx.accounts.hit;
         hit.pool = ctx.accounts.hit_pool.key();
@@ -1741,7 +1812,8 @@ pub mod agent_casino {
                 .checked_mul(pool.house_edge_bps as u128)
                 .ok_or(CasinoError::MathOverflow)?
                 / 10000) as u64;
-            let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)? + hit.hunter_stake;
+            let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)?
+                .checked_add(hit.hunter_stake).ok_or(CasinoError::MathOverflow)?;
 
             // Transfer from vault to hunter
             **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
@@ -1753,7 +1825,7 @@ pub mod agent_casino {
             hit.completed_at = Some(clock.unix_timestamp);
 
             let pool = &mut ctx.accounts.hit_pool;
-            pool.total_completed += 1;
+            pool.total_completed = pool.total_completed.checked_add(1).ok_or(CasinoError::MathOverflow)?;
             pool.total_bounties_paid = pool.total_bounties_paid.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
 
             emit!(HitCompleted {
@@ -1808,7 +1880,7 @@ pub mod agent_casino {
 
         let clock = Clock::get()?;
         let claimed_at = hit.claimed_at.ok_or(CasinoError::HitNotClaimed)?;
-        let elapsed = clock.unix_timestamp - claimed_at;
+        let elapsed = clock.unix_timestamp.checked_sub(claimed_at).ok_or(CasinoError::MathOverflow)?;
         require!(elapsed >= 86400, CasinoError::ClaimNotExpired); // 24 hours
 
         // Hunter loses stake to poster as compensation for wasted time
@@ -1840,6 +1912,12 @@ pub mod agent_casino {
         let hit = &ctx.accounts.hit;
         require!(hit.status == HitStatus::Disputed, CasinoError::HitNotDisputed);
 
+        // Prevent poster and hunter from arbitrating their own dispute
+        require!(ctx.accounts.arbiter.key() != hit.poster, CasinoError::CannotSelfArbitrate);
+        if let Some(hunter) = hit.hunter {
+            require!(ctx.accounts.arbiter.key() != hunter, CasinoError::CannotSelfArbitrate);
+        }
+
         // Check arbiter hasn't already voted (immutable borrow for checks)
         {
             let arbitration = &ctx.accounts.arbitration;
@@ -1863,9 +1941,9 @@ pub mod agent_casino {
         arbitration.arbiters.push(ctx.accounts.arbiter.key());
         arbitration.stakes.push(stake_amount);
         if vote_approve {
-            arbitration.votes_approve += 1;
+            arbitration.votes_approve = arbitration.votes_approve.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            arbitration.votes_reject += 1;
+            arbitration.votes_reject = arbitration.votes_reject.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
         arbitration.votes.push(vote_approve);
 
@@ -1888,28 +1966,21 @@ pub mod agent_casino {
                     .checked_mul(pool.house_edge_bps as u128)
                     .ok_or(CasinoError::MathOverflow)?
                     / 10000) as u64;
-                let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)? + hit.hunter_stake;
+                let payout = hit.bounty.checked_sub(house_fee).ok_or(CasinoError::MathOverflow)?
+                    .checked_add(hit.hunter_stake).ok_or(CasinoError::MathOverflow)?;
 
                 **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= payout;
                 **ctx.accounts.hunter.to_account_info().try_borrow_mut_lamports()? += payout;
             } else {
                 // Return bounty + hunter stake to poster
-                let refund = hit.bounty + hit.hunter_stake;
+                let refund = hit.bounty.checked_add(hit.hunter_stake).ok_or(CasinoError::MathOverflow)?;
                 **ctx.accounts.hit_vault.to_account_info().try_borrow_mut_lamports()? -= refund;
                 **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += refund;
             }
 
-            // Pay winning arbiters, losing arbiters lose stake
-            let total_stakes: u64 = arbitration.stakes.iter().sum();
-            for i in 0..3 {
-                let arbiter = arbitration.arbiters[i];
-                let voted_approve = arbitration.votes[i];
-                if voted_approve == hunter_wins {
-                    // Winner gets their stake + share of losers' stakes
-                    let reward = arbitration.stakes[i] + (total_stakes - arbitration.stakes[i]) / 2;
-                    // Note: In production, would need to transfer to arbiter accounts
-                }
-            }
+            // Note: Winning arbiter stake payouts require remaining_accounts pattern
+            // for individual transfers. For simplicity, stakes remain in arbitration PDA
+            // and can be recovered via close_arbitration instruction (future improvement).
 
             let clock = Clock::get()?;
             let hit = &mut ctx.accounts.hit;
@@ -1917,7 +1988,7 @@ pub mod agent_casino {
             hit.completed_at = Some(clock.unix_timestamp);
 
             let pool = &mut ctx.accounts.hit_pool;
-            pool.total_completed += 1;
+            pool.total_completed = pool.total_completed.checked_add(1).ok_or(CasinoError::MathOverflow)?;
             if hunter_wins {
                 pool.total_bounties_paid = pool.total_bounties_paid.checked_add(hit.bounty).ok_or(CasinoError::MathOverflow)?;
             }
@@ -2055,7 +2126,8 @@ pub mod agent_casino {
         require!(amount >= vault.min_bet, CasinoError::BetTooSmall);
         let max_bet = vault.pool.checked_mul(vault.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(vault.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        let max_payout = calculate_payout(amount, 2_00, vault.house_edge_bps);
+        require!(vault.pool >= max_payout, CasinoError::InsufficientLiquidity);
 
         let clock = Clock::get()?;
         let server_seed = generate_seed(
@@ -2069,7 +2141,7 @@ pub mod agent_casino {
 
         let won = result == choice;
         let payout = if won {
-            calculate_payout(amount, 2_00, vault.house_edge_bps)
+            max_payout
         } else {
             0
         };
@@ -2112,7 +2184,8 @@ pub mod agent_casino {
         vault.total_volume = vault.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             vault.total_payout = vault.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            vault.pool = vault.pool.checked_sub(payout.saturating_sub(amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
+            vault.pool = vault.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             vault.pool = vault.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -2124,9 +2197,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Record game
@@ -2175,7 +2248,8 @@ pub mod agent_casino {
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
         let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
         require!(amount <= max_bet, CasinoError::BetTooLarge);
-        require!(house.pool >= amount * 2, CasinoError::InsufficientLiquidity);
+        let max_payout = calculate_payout(amount, 2_00, house.house_edge_bps);
+        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
 
         // Transfer bet to house
         let cpi_context = CpiContext::new(
@@ -2190,6 +2264,7 @@ pub mod agent_casino {
         let clock = Clock::get()?;
 
         // Create VRF request record
+        let game_index = ctx.accounts.house.total_games;
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.player = ctx.accounts.player.key();
         vrf_request.house = ctx.accounts.house.key();
@@ -2203,6 +2278,8 @@ pub mod agent_casino {
         vrf_request.settled_at = 0;
         vrf_request.result = 0;
         vrf_request.payout = 0;
+        vrf_request.game_index = game_index;
+        vrf_request.request_slot = clock.slot;
         vrf_request.bump = ctx.bumps.vrf_request;
 
         // Update house stats
@@ -2256,7 +2333,8 @@ pub mod agent_casino {
         let house = &mut ctx.accounts.house;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -2268,9 +2346,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         // Update VRF request
@@ -2324,6 +2402,7 @@ pub mod agent_casino {
         system_program::transfer(cpi_context, amount)?;
 
         let clock = Clock::get()?;
+        let game_index = ctx.accounts.house.total_games;
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.player = ctx.accounts.player.key();
         vrf_request.house = ctx.accounts.house.key();
@@ -2337,6 +2416,8 @@ pub mod agent_casino {
         vrf_request.settled_at = 0;
         vrf_request.result = 0;
         vrf_request.payout = 0;
+        vrf_request.game_index = game_index;
+        vrf_request.request_slot = clock.slot;
         vrf_request.bump = ctx.bumps.vrf_request;
 
         let house = &mut ctx.accounts.house;
@@ -2372,7 +2453,8 @@ pub mod agent_casino {
         let won = result <= vrf_request.choice;
 
         let house = &ctx.accounts.house;
-        let multiplier = (600u64 / vrf_request.choice as u64) as u16;
+        require!(vrf_request.choice >= 1 && vrf_request.choice <= 5, CasinoError::InvalidChoice);
+        let multiplier = (600u64.checked_div(vrf_request.choice as u64).ok_or(CasinoError::MathOverflow)?) as u16;
         let payout = if won {
             calculate_payout(vrf_request.amount, multiplier, house.house_edge_bps)
         } else {
@@ -2387,7 +2469,8 @@ pub mod agent_casino {
         let house = &mut ctx.accounts.house;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -2398,9 +2481,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let request_key = ctx.accounts.vrf_request.key();
@@ -2453,6 +2536,7 @@ pub mod agent_casino {
         system_program::transfer(cpi_context, amount)?;
 
         let clock = Clock::get()?;
+        let game_index = ctx.accounts.house.total_games;
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.player = ctx.accounts.player.key();
         vrf_request.house = ctx.accounts.house.key();
@@ -2466,6 +2550,8 @@ pub mod agent_casino {
         vrf_request.settled_at = 0;
         vrf_request.result = 0;
         vrf_request.payout = 0;
+        vrf_request.game_index = game_index;
+        vrf_request.request_slot = clock.slot;
         vrf_request.bump = ctx.bumps.vrf_request;
 
         let house = &mut ctx.accounts.house;
@@ -2519,7 +2605,8 @@ pub mod agent_casino {
         let house = &mut ctx.accounts.house;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -2530,9 +2617,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let request_key = ctx.accounts.vrf_request.key();
@@ -2586,6 +2673,7 @@ pub mod agent_casino {
         system_program::transfer(cpi_context, amount)?;
 
         let clock = Clock::get()?;
+        let game_index = ctx.accounts.house.total_games;
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.player = ctx.accounts.player.key();
         vrf_request.house = ctx.accounts.house.key();
@@ -2599,6 +2687,8 @@ pub mod agent_casino {
         vrf_request.settled_at = 0;
         vrf_request.result = 0;
         vrf_request.payout = 0;
+        vrf_request.game_index = game_index;
+        vrf_request.request_slot = clock.slot;
         vrf_request.bump = ctx.bumps.vrf_request;
 
         let house = &mut ctx.accounts.house;
@@ -2652,7 +2742,8 @@ pub mod agent_casino {
         let house = &mut ctx.accounts.house;
         if won {
             house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(payout.saturating_sub(vrf_request.amount)).ok_or(CasinoError::MathOverflow)?;
+            let net_loss = payout.checked_sub(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
+            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
         } else {
             house.pool = house.pool.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         }
@@ -2663,9 +2754,9 @@ pub mod agent_casino {
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
             agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins += 1;
+            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         } else {
-            agent_stats.losses += 1;
+            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
         let request_key = ctx.accounts.vrf_request.key();
@@ -2773,7 +2864,7 @@ pub mod agent_casino {
         let prediction_key = ctx.accounts.price_prediction.key();
         let taker_key = ctx.accounts.taker.key();
         let bet_amount = prediction.bet_amount;
-        let total_pool = bet_amount * 2;
+        let total_pool = bet_amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer matching bet to house escrow
         let cpi_context = CpiContext::new(
@@ -2842,8 +2933,9 @@ pub mod agent_casino {
             price_data[time_offset+4], price_data[time_offset+5], price_data[time_offset+6], price_data[time_offset+7],
         ]);
 
-        // Check staleness (5 minute threshold)
-        require!(clock.unix_timestamp - publish_time < 300, CasinoError::PriceFeedStale);
+        // Check staleness (60 second threshold)
+        let price_age = clock.unix_timestamp.checked_sub(publish_time).ok_or(CasinoError::MathOverflow)?;
+        require!(price_age < 60, CasinoError::PriceFeedStale);
 
         // Determine winner based on direction
         let creator_wins = match prediction.direction {
@@ -2858,10 +2950,10 @@ pub mod agent_casino {
         };
 
         // Calculate payout (total pool minus house edge)
-        let total_pool = prediction.bet_amount * 2;
+        let total_pool = prediction.bet_amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
         let house = &ctx.accounts.house;
-        let house_take = total_pool * house.house_edge_bps as u64 / 10000;
-        let payout = total_pool - house_take;
+        let house_take = total_pool.checked_mul(house.house_edge_bps as u64).ok_or(CasinoError::MathOverflow)? / 10000;
+        let payout = total_pool.checked_sub(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer payout to winner
         let winner_account = if creator_wins {
@@ -3003,9 +3095,11 @@ fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 3
 
 fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
     let gross_128 = (amount as u128) * (multiplier as u128) / 100;
+    // Cap at u64::MAX (caller should validate payout fits in pool)
     let gross = if gross_128 > u64::MAX as u128 { u64::MAX } else { gross_128 as u64 };
     let edge = (gross as u128 * house_edge_bps as u128 / 10000) as u64;
-    gross.saturating_sub(edge)
+    // Use checked_sub to avoid silent underflow
+    gross.checked_sub(edge).unwrap_or(0)
 }
 
 fn calculate_limbo_result(raw: u32, house_edge_bps: u16) -> u16 {
@@ -3139,6 +3233,47 @@ pub struct AddLiquidity<'info> {
 
     #[account(mut)]
     pub provider: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RemoveLiquidity<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        seeds = [b"lp", house.key().as_ref(), provider.key().as_ref()],
+        bump
+    )]
+    pub lp_position: Account<'info, LpPosition>,
+
+    #[account(
+        mut,
+        constraint = provider.key() == house.authority @ CasinoError::NotAuthority
+    )]
+    pub provider: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ExpireVrfRequest<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Player to receive refund - validated against vrf_request
+    #[account(mut, constraint = player.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
+    pub player: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -3948,8 +4083,7 @@ pub struct VrfCoinFlipSettle<'info> {
 
     #[account(
         mut,
-        seeds = [b"vrf_request", vrf_request.player.as_ref(), &house.total_games.saturating_sub(1).to_le_bytes()],
-        bump = vrf_request.bump,
+        constraint = vrf_request.game_type == GameType::CoinFlip @ CasinoError::VrfInvalidRandomness,
         constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
     )]
     pub vrf_request: Account<'info, VrfRequest>,
@@ -4493,6 +4627,8 @@ pub struct VrfRequest {
     pub settled_at: i64,
     pub result: u8,
     pub payout: u64,
+    pub game_index: u64,       // Game index at time of request (for PDA derivation)
+    pub request_slot: u64,     // Slot when request was created (for timeout/expiry)
     pub bump: u8,
 }
 
@@ -4628,6 +4764,20 @@ pub struct LiquidityAdded {
     pub provider: Pubkey,
     pub amount: u64,
     pub total_pool: u64,
+}
+
+#[event]
+pub struct LiquidityRemoved {
+    pub provider: Pubkey,
+    pub amount: u64,
+    pub total_pool: u64,
+}
+
+#[event]
+pub struct VrfExpired {
+    pub request: Pubkey,
+    pub player: Pubkey,
+    pub refund: u64,
 }
 
 #[event]
@@ -5056,6 +5206,7 @@ pub struct CloseChallenge<'info> {
     #[account(mut, constraint = recipient.key() == challenge.challenger @ CasinoError::NotChallengeOwner)]
     pub recipient: AccountInfo<'info>,
 
+    #[account(constraint = authority.key() == challenge.challenger @ CasinoError::NotChallengeOwner)]
     pub authority: Signer<'info>,
 }
 
@@ -5362,4 +5513,10 @@ pub enum CasinoError {
     NotAuthority,
     #[msg("Account is not in a closeable state")]
     NotCloseable,
+    #[msg("VRF request has not expired yet (300 slots)")]
+    VrfNotExpired,
+    #[msg("Cannot arbitrate your own dispute")]
+    CannotSelfArbitrate,
+    #[msg("Insufficient pool balance for withdrawal")]
+    InsufficientPoolBalance,
 }

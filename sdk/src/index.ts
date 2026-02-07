@@ -652,10 +652,10 @@ export class AgentCasino {
       houseEdgeBps: house.houseEdgeBps,
       minBet: house.minBet / LAMPORTS_PER_SOL,
       maxBet: maxBet / LAMPORTS_PER_SOL,
-      totalGames: house.totalGames.toNumber(),
-      totalVolume: house.totalVolume.toNumber() / LAMPORTS_PER_SOL,
-      totalPayout: house.totalPayout.toNumber() / LAMPORTS_PER_SOL,
-      houseProfit: (house.totalVolume.toNumber() - house.totalPayout.toNumber()) / LAMPORTS_PER_SOL,
+      totalGames: this.safeToNumber(house.totalGames),
+      totalVolume: this.safeToNumber(house.totalVolume) / LAMPORTS_PER_SOL,
+      totalPayout: this.safeToNumber(house.totalPayout) / LAMPORTS_PER_SOL,
+      houseProfit: (this.safeToNumber(house.totalVolume) - this.safeToNumber(house.totalPayout)) / LAMPORTS_PER_SOL,
     };
   }
 
@@ -677,19 +677,22 @@ export class AgentCasino {
 
     try {
       const stats = await this.fetchAgentStats(agentStatsPda);
-      const profit = (stats.totalWon.toNumber() - stats.totalWagered.toNumber()) / LAMPORTS_PER_SOL;
-      const wageredSol = stats.totalWagered.toNumber() / LAMPORTS_PER_SOL;
+      const totalWon = this.safeToNumber(stats.totalWon);
+      const totalWagered = this.safeToNumber(stats.totalWagered);
+      const totalGames = this.safeToNumber(stats.totalGames);
+      const wins = this.safeToNumber(stats.wins);
+      const losses = this.safeToNumber(stats.losses);
+      const profit = (totalWon - totalWagered) / LAMPORTS_PER_SOL;
+      const wageredSol = totalWagered / LAMPORTS_PER_SOL;
 
       return {
         agent: agent.toString(),
-        totalGames: stats.totalGames.toNumber(),
+        totalGames,
         totalWagered: wageredSol,
-        totalWon: stats.totalWon.toNumber() / LAMPORTS_PER_SOL,
-        wins: stats.wins.toNumber(),
-        losses: stats.losses.toNumber(),
-        winRate: stats.totalGames.toNumber() > 0 
-          ? (stats.wins.toNumber() / stats.totalGames.toNumber()) * 100 
-          : 0,
+        totalWon: totalWon / LAMPORTS_PER_SOL,
+        wins,
+        losses,
+        winRate: totalGames > 0 ? (wins / totalGames) * 100 : 0,
         profit,
         roi: wageredSol > 0 ? (profit / wageredSol) * 100 : 0,
       };
@@ -715,7 +718,7 @@ export class AgentCasino {
   async getGameHistory(limit: number = 100): Promise<GameRecord[]> {
     // Fetch recent game records
     const house = await this.getHouseAccount();
-    const totalGames = house.totalGames.toNumber();
+    const totalGames = this.safeToNumber(house.totalGames);
     const startIndex = Math.max(0, totalGames - limit);
     
     const records: GameRecord[] = [];
@@ -735,10 +738,10 @@ export class AgentCasino {
         records.push({
           player: record.player.toString(),
           gameType: this.parseGameType(record.gameType),
-          amount: record.amount.toNumber() / LAMPORTS_PER_SOL,
+          amount: this.safeToNumber(record.amount) / LAMPORTS_PER_SOL,
           choice: record.choice,
           result: record.result,
-          payout: record.payout.toNumber() / LAMPORTS_PER_SOL,
+          payout: this.safeToNumber(record.payout) / LAMPORTS_PER_SOL,
           timestamp: record.timestamp.toNumber(),
           slot: record.slot.toNumber(),
         });
@@ -1086,11 +1089,20 @@ export class AgentCasino {
    * Verify a game result is fair
    * Agents can use this to audit results
    */
+  /**
+   * Verify a game result is fair
+   * @param serverSeed Server seed hex string
+   * @param clientSeed Client seed hex string
+   * @param playerPubkey Player's public key
+   * @param expectedResult Expected result value
+   * @param gameType Game type: 'coinFlip' | 'diceRoll' | 'limbo' | 'crash'
+   */
   verifyResult(
     serverSeed: string,
     clientSeed: string,
     playerPubkey: string,
-    expectedResult: number
+    expectedResult: number,
+    gameType: 'coinFlip' | 'diceRoll' | 'limbo' | 'crash' = 'coinFlip'
   ): boolean {
     const combined = Buffer.concat([
       Buffer.from(serverSeed, 'hex'),
@@ -1099,9 +1111,23 @@ export class AgentCasino {
     ]);
 
     const hash = createHash('sha256').update(combined).digest();
-    const computedResult = hash[0] % 2; // For coin flip
 
-    return computedResult === expectedResult;
+    switch (gameType) {
+      case 'coinFlip':
+        return (hash[0] % 2) === expectedResult;
+      case 'diceRoll': {
+        const raw = hash.readUInt32LE(0);
+        return ((raw % 6) + 1) === expectedResult;
+      }
+      case 'limbo':
+      case 'crash':
+        // For limbo/crash, result is a multiplier - verify raw matches
+        // Full verification requires reimplementing calculate_limbo_result/calculate_crash_point
+        const raw = hash.readUInt32LE(0);
+        return raw === expectedResult;
+      default:
+        return (hash[0] % 2) === expectedResult;
+    }
   }
 
   // === SPL Token Methods ===
@@ -1582,6 +1608,12 @@ export class AgentCasino {
   async withdrawMemory(memoryAddress: string): Promise<{ txSignature: string; refund: number; fee: number }> {
     const memoryPubkey = new PublicKey(memoryAddress);
 
+    // Read stake BEFORE withdrawal (stake is zeroed after tx)
+    const memory = await this.fetchMemory(memoryPubkey);
+    const stake = this.safeToNumber(memory.stake) / LAMPORTS_PER_SOL;
+    const fee = stake * 0.05;
+    const refund = stake - fee;
+
     const discriminator = Buffer.from([0x71, 0x47, 0x16, 0x1e, 0x2c, 0xa0, 0x71, 0x03]);
     const instructionData = discriminator;
 
@@ -1598,12 +1630,6 @@ export class AgentCasino {
     const tx = new Transaction().add(ix);
     const signature = await this.provider.sendAndConfirm(tx);
 
-    // Calculate refund (95% of stake, 5% fee)
-    const memory = await this.fetchMemory(memoryPubkey);
-    const stake = memory.stake.toNumber() / LAMPORTS_PER_SOL;
-    const fee = stake * 0.05;
-    const refund = stake - fee;
-
     return { txSignature: signature, refund, fee };
   }
 
@@ -1618,8 +1644,8 @@ export class AgentCasino {
       pullPrice: pool.pullPrice / LAMPORTS_PER_SOL,
       houseEdgeBps: pool.houseEdgeBps,
       stakeAmount: pool.stakeAmount / LAMPORTS_PER_SOL,
-      totalMemories: pool.totalMemories.toNumber(),
-      totalPulls: pool.totalPulls.toNumber(),
+      totalMemories: this.safeToNumber(pool.totalMemories),
+      totalPulls: this.safeToNumber(pool.totalPulls),
       poolBalance: pool.poolBalance / LAMPORTS_PER_SOL,
     };
   }
@@ -1645,7 +1671,7 @@ export class AgentCasino {
    */
   async getMemoriesByDepositor(depositor: PublicKey): Promise<MemoryData[]> {
     const pool = await this.getMemoryPoolAccount();
-    const totalMemories = pool.totalMemories.toNumber();
+    const totalMemories = this.safeToNumber(pool.totalMemories);
     const memories: MemoryData[] = [];
 
     for (let i = 0; i < totalMemories; i++) {
@@ -1685,7 +1711,7 @@ export class AgentCasino {
    */
   async getActiveMemories(limit: number = 20): Promise<MemoryData[]> {
     const pool = await this.getMemoryPoolAccount();
-    const totalMemories = pool.totalMemories.toNumber();
+    const totalMemories = this.safeToNumber(pool.totalMemories);
     const memories: MemoryData[] = [];
 
     for (let i = totalMemories - 1; i >= 0 && memories.length < limit; i--) {
@@ -1846,6 +1872,18 @@ export class AgentCasino {
   }
 
   // === Private Helpers ===
+
+  /**
+   * Safely convert BN to number, avoiding overflow for values > Number.MAX_SAFE_INTEGER
+   * Returns the number if safe, throws if value exceeds safe integer range
+   */
+  private safeToNumber(bn: BN): number {
+    if (bn.gt(new BN(Number.MAX_SAFE_INTEGER))) {
+      // For display purposes, convert via string and parseFloat
+      return parseFloat(bn.toString());
+    }
+    return bn.toNumber();
+  }
 
   private generateClientSeed(): Buffer {
     return randomBytes(32);

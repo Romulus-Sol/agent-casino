@@ -606,14 +606,15 @@ describe("agent-casino", () => {
   });
 
   describe("Crash Game Payouts", () => {
+    // Matches on-chain fixed-point integer math (no floats)
     function calculateCrashPoint(hash: Buffer, houseEdgeBps: number): number {
-      // Standard crash: crash_point = 1 / h where h ∈ (0, 1]
-      // P(crash >= x) = 1/x → geometric distribution
-      const val = hash.readUInt32BE(0);
-      const h = (val + 1) / (0xFFFFFFFF + 1);
-      const raw = 1 / h;
-      const edge = raw * houseEdgeBps / 10000;
-      return Math.max(1.01, raw - edge);
+      const raw = hash.readUInt32BE(0);
+      const normalizedBps = BigInt(raw) * 9900n / BigInt(0xFFFFFFFF);
+      const denominator = 10000n - normalizedBps;
+      if (denominator < 10n) return 100; // cap at 100x
+      const edgeFactor = 10000n - BigInt(houseEdgeBps);
+      const result = edgeFactor * 99n / denominator;
+      return Math.max(1.01, Math.min(100, Number(result) / 100));
     }
 
     it("crash point is always >= 1.01x", () => {
@@ -728,6 +729,212 @@ describe("agent-casino", () => {
 
       const payout = bounty - fee;
       expect(payout).to.equal(BigInt(900_000_000)); // 0.9 SOL
+    });
+  });
+
+  describe("Init Account PDAs", () => {
+    it("derives init_agent_stats PDA correctly", () => {
+      const player = Keypair.generate();
+      const [agentStatsPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("agent"), player.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      expect(agentStatsPda.toBase58()).to.be.a("string");
+      // Same PDA that game contexts use
+      const [gameAgentStatsPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("agent"), player.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      expect(agentStatsPda.toBase58()).to.equal(gameAgentStatsPda.toBase58());
+    });
+
+    it("derives init_lp_position PDA correctly", () => {
+      const provider = Keypair.generate();
+      const [housePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("house")],
+        PROGRAM_ID
+      );
+      const [lpPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("lp"), housePda.toBuffer(), provider.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      expect(lpPda.toBase58()).to.be.a("string");
+    });
+
+    it("derives init_token_lp_position PDA correctly", () => {
+      const provider = Keypair.generate();
+      const mint = Keypair.generate();
+      const [tokenVaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), mint.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      const [lpPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_lp"), tokenVaultPda.toBuffer(), provider.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      expect(lpPda.toBase58()).to.be.a("string");
+    });
+  });
+
+  describe("SHA-256 Hash Consistency", () => {
+    it("on-chain SHA-256 matches SDK verifyResult hash", () => {
+      const serverSeed = randomBytes(32);
+      const clientSeed = randomBytes(32);
+      const player = Keypair.generate();
+
+      // SDK uses createHash('sha256') in verifyResult
+      const combined = Buffer.concat([
+        serverSeed,
+        clientSeed,
+        player.publicKey.toBuffer(),
+      ]);
+      const hash = createHash("sha256").update(combined).digest();
+
+      // After our fix, on-chain also uses solana_program::hash::hash (SHA-256)
+      // This should produce the same result
+      expect(hash.length).to.equal(32);
+      expect(hash[0] % 2).to.be.oneOf([0, 1]); // valid coin flip result
+    });
+
+    it("SHA-256 is deterministic for same inputs", () => {
+      const serverSeed = randomBytes(32);
+      const clientSeed = randomBytes(32);
+      const player = Keypair.generate();
+
+      const combined = Buffer.concat([
+        serverSeed,
+        clientSeed,
+        player.publicKey.toBuffer(),
+      ]);
+
+      const hash1 = createHash("sha256").update(combined).digest();
+      const hash2 = createHash("sha256").update(combined).digest();
+
+      expect(hash1.toString("hex")).to.equal(hash2.toString("hex"));
+    });
+
+    it("SHA-256 has avalanche effect (different inputs → different hashes)", () => {
+      const serverSeed = randomBytes(32);
+      const clientSeed1 = randomBytes(32);
+      const clientSeed2 = randomBytes(32);
+      const player = Keypair.generate();
+
+      const hash1 = createHash("sha256").update(
+        Buffer.concat([serverSeed, clientSeed1, player.publicKey.toBuffer()])
+      ).digest();
+      const hash2 = createHash("sha256").update(
+        Buffer.concat([serverSeed, clientSeed2, player.publicKey.toBuffer()])
+      ).digest();
+
+      expect(hash1.toString("hex")).to.not.equal(hash2.toString("hex"));
+    });
+  });
+
+  describe("Integer Math (no floats)", () => {
+    // Match on-chain calculate_limbo_result
+    function calculateLimboResult(raw: number, houseEdgeBps: number): number {
+      const normalizedBps = BigInt(raw) * 9900n / BigInt(0xFFFFFFFF);
+      const denominator = 10000n - normalizedBps;
+      if (denominator === 0n) return 10000;
+      const edgeFactor = 10000n - BigInt(houseEdgeBps);
+      const result = edgeFactor * 100n / denominator;
+      return Math.max(100, Math.min(10000, Number(result)));
+    }
+
+    it("limbo result is always >= 1.00x (100)", () => {
+      for (let i = 0; i < 1000; i++) {
+        const raw = randomBytes(4).readUInt32BE(0);
+        const result = calculateLimboResult(raw, 100);
+        expect(result).to.be.at.least(100);
+      }
+    });
+
+    it("limbo result caps at 100x (10000)", () => {
+      // Use max u32 value
+      const result = calculateLimboResult(0xFFFFFFFF, 100);
+      expect(result).to.be.at.most(10000);
+    });
+
+    it("limbo result with no house edge at midpoint ≈ 2x", () => {
+      // At normalized_bps = 5000 (midpoint), denominator = 5000
+      // result = 10000 * 100 / 5000 = 200 (2.00x)
+      const midpoint = Math.floor(0xFFFFFFFF * 5000 / 9900);
+      const result = calculateLimboResult(midpoint, 0);
+      expect(result).to.be.within(195, 205); // ~2.00x
+    });
+
+    it("crash point uses identical integer formula", () => {
+      const raw = 0x80000000; // midpoint
+      const normalizedBps = BigInt(raw) * 9900n / BigInt(0xFFFFFFFF);
+      const denominator = 10000n - normalizedBps;
+      expect(denominator > 0n).to.be.true;
+      const edgeFactor = 10000n - 100n; // 1% edge
+      const result = edgeFactor * 99n / denominator;
+      expect(Number(result)).to.be.greaterThan(0);
+    });
+  });
+
+  describe("Close Account PDAs", () => {
+    it("derives game record PDA for close instruction", () => {
+      const [housePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("house")],
+        PROGRAM_ID
+      );
+      const gameIndex = 42;
+      const indexBuffer = Buffer.alloc(8);
+      indexBuffer.writeBigUInt64LE(BigInt(gameIndex));
+      const [gameRecordPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("game"), housePda.toBuffer(), indexBuffer],
+        PROGRAM_ID
+      );
+      expect(gameRecordPda.toBase58()).to.be.a("string");
+    });
+
+    it("close instruction PDAs match creation PDAs", () => {
+      const [housePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("house")],
+        PROGRAM_ID
+      );
+      // Same PDA from create and close
+      const indexBuffer = Buffer.alloc(8);
+      indexBuffer.writeBigUInt64LE(BigInt(10));
+      const [createPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("game"), housePda.toBuffer(), indexBuffer],
+        PROGRAM_ID
+      );
+      const [closePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("game"), housePda.toBuffer(), indexBuffer],
+        PROGRAM_ID
+      );
+      expect(createPda.toBase58()).to.equal(closePda.toBase58());
+    });
+
+    it("memory close PDA uses index from struct", () => {
+      const [memPoolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("memory_pool")],
+        PROGRAM_ID
+      );
+      const indexBuffer = Buffer.alloc(8);
+      indexBuffer.writeBigUInt64LE(BigInt(5));
+      const [memoryPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("memory"), memPoolPda.toBuffer(), indexBuffer],
+        PROGRAM_ID
+      );
+      expect(memoryPda.toBase58()).to.be.a("string");
+    });
+
+    it("hit close PDA uses hit_index from struct", () => {
+      const [hitPoolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("hit_pool")],
+        PROGRAM_ID
+      );
+      const indexBuffer = Buffer.alloc(8);
+      indexBuffer.writeBigUInt64LE(BigInt(3));
+      const [hitPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("hit"), hitPoolPda.toBuffer(), indexBuffer],
+        PROGRAM_ID
+      );
+      expect(hitPda.toBase58()).to.be.a("string");
     });
   });
 

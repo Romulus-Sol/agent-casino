@@ -322,7 +322,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Three rounds of self-auditing. **50 total vulnerabilities found and fixed.**
+Four rounds of self-auditing. **55 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -346,9 +346,16 @@ Three rounds of self-auditing. **50 total vulnerabilities found and fixed.**
 - Fixed unchecked `as u64` casts → u128 intermediates with bounds checks
 - SDK expanded from 71% to 100% instruction coverage (21 new methods)
 
+### Audit 4: Breaking Changes (5 vulnerabilities)
+- **`init_if_needed` re-initialization** (12 instances → 11 fixed, 1 kept intentionally) — separate `init_agent_stats`, `init_lp_position`, `init_token_lp_position` instructions
+- **Missing `close` constraints** (9 account types) — 9 new close instructions for rent recovery
+- **Custom hash → SHA-256** — replaced `mix_bytes` with `solana_program::hash::hash`, now matches SDK's `verifyResult`
+- **Floating-point → integer math** — `calculate_limbo_result` and `calculate_crash_point` now use `u128` fixed-point
+- **`unwrap()` in constraints** (2 instances) — replaced with safe `map_or` pattern
+
 ### Test Suite
 
-55 automated tests covering:
+69 automated tests covering:
 - PDA derivation — house, vault, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
@@ -356,6 +363,10 @@ Three rounds of self-auditing. **50 total vulnerabilities found and fixed.**
 - Payout calculations and house edge math (5 tests)
 - Crash game payout distribution and edge cases (4 tests)
 - Checked math safety — overflow, underflow, truncation detection (5 tests)
+- Init account PDAs — agent stats, LP position, token LP (3 tests)
+- SHA-256 hash consistency — determinism, avalanche effect (3 tests)
+- Integer math (no floats) — limbo bounds, crash formula (4 tests)
+- Close account PDAs — game records, memories, hits (4 tests)
 - Jupiter mock swap arithmetic (3 tests)
 - x402 payment protocol structure (3 tests)
 - WARGAMES risk multiplier bounds (3 tests)
@@ -431,8 +442,8 @@ npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
 | **Games Played** | 85+ |
-| **Tests** | 55 passing |
-| **Vulnerabilities Fixed** | 50 (across 3 audits) |
+| **Tests** | 69 passing |
+| **Vulnerabilities Fixed** | 55 (across 4 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

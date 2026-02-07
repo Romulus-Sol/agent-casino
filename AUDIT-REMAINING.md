@@ -4,7 +4,7 @@
 **Program:** Agent Casino Protocol (`5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`)
 **File:** `programs/agent_casino/src/lib.rs`
 
-These 5 categories of issues were identified in Audit 1 but not fixed because they require breaking changes to deployed accounts or alter game outcome calculations. They remain open.
+**STATUS: ALL 5 ISSUES FIXED** — Deployed February 6, 2026. See commit history for changes.
 
 ---
 

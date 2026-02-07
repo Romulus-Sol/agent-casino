@@ -25,6 +25,7 @@ import {
   PublicKey,
   Keypair,
   Transaction,
+  TransactionInstruction,
   VersionedTransaction,
   SystemProgram,
   LAMPORTS_PER_SOL,
@@ -297,6 +298,156 @@ export class AgentCasino {
     this.program = new Program(idl, this.provider);
   }
 
+  // === Init Methods (must call before first game/liquidity) ===
+
+  /**
+   * Initialize agent stats account. Must be called once before playing any game.
+   * Idempotent — returns early if account already exists.
+   */
+  async initAgentStats(): Promise<string | null> {
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    // Check if already initialized
+    const existing = await this.connection.getAccountInfo(agentStatsPda);
+    if (existing) return null;
+
+    const discriminator = Buffer.from([0x5f, 0x3a, 0xd2, 0x22, 0xd5, 0x06, 0x1f, 0xb8]);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: agentStatsPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: discriminator,
+    });
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Ensure agent stats exist before playing. Auto-initializes if needed.
+   */
+  async ensureAgentStats(): Promise<void> {
+    await this.initAgentStats();
+  }
+
+  /**
+   * Initialize LP position account. Must be called once before adding liquidity.
+   */
+  async initLpPosition(): Promise<string | null> {
+    const [lpPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('lp'), this.housePda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const existing = await this.connection.getAccountInfo(lpPda);
+    if (existing) return null;
+
+    const discriminator = Buffer.from([0xc5, 0x57, 0x25, 0x16, 0xe3, 0x0a, 0x51, 0xdd]);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: lpPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: discriminator,
+    });
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Initialize token LP position account. Must be called once before adding token liquidity.
+   */
+  async initTokenLpPosition(mintAddress: PublicKey): Promise<string | null> {
+    const [tokenVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_vault'), mintAddress.toBuffer()],
+      PROGRAM_ID
+    );
+    const [lpPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_lp'), tokenVaultPda.toBuffer(), this.wallet.publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+
+    const existing = await this.connection.getAccountInfo(lpPda);
+    if (existing) return null;
+
+    const discriminator = Buffer.from([0x98, 0x01, 0x6d, 0x13, 0x76, 0xb2, 0x31, 0x5a]);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: tokenVaultPda, isSigner: false, isWritable: false },
+        { pubkey: mintAddress, isSigner: false, isWritable: false },
+        { pubkey: lpPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: discriminator,
+    });
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  // === Close Methods (rent recovery) ===
+
+  /**
+   * Close a game record to recover rent. Authority only.
+   */
+  async closeGameRecord(gameIndex: number, recipient?: PublicKey): Promise<string> {
+    const [gameRecordPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('game'), this.housePda.toBuffer(), new BN(gameIndex).toArrayLike(Buffer, 'le', 8)],
+      PROGRAM_ID
+    );
+
+    const discriminator = Buffer.from([0x0b, 0xb5, 0x2e, 0x1a, 0xfe, 0x03, 0x40, 0x7a]);
+    const data = Buffer.alloc(8 + 8);
+    discriminator.copy(data);
+    new BN(gameIndex).toArrayLike(Buffer, 'le', 8).copy(data, 8);
+
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: gameRecordPda, isSigner: false, isWritable: true },
+        { pubkey: recipient || this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
+  /**
+   * Close a settled VRF request to recover rent. Authority only.
+   */
+  async closeVrfRequest(vrfRequestAddress: PublicKey, recipient?: PublicKey): Promise<string> {
+    const discriminator = Buffer.from([0xe8, 0x5d, 0x65, 0x7c, 0x71, 0xc3, 0x6c, 0xb6]);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: vrfRequestAddress, isSigner: false, isWritable: true },
+        { pubkey: recipient || this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: discriminator,
+    });
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
   // === Game Methods ===
 
   /**
@@ -306,6 +457,7 @@ export class AgentCasino {
    * @returns Game result with verification data
    */
   async coinFlip(amountSol: number, choice: CoinChoice): Promise<GameResult> {
+    await this.ensureAgentStats();
     const clientSeed = this.generateClientSeed();
     const choiceNum = choice === 'heads' ? 0 : 1;
     const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
@@ -353,6 +505,7 @@ export class AgentCasino {
    * @returns Game result with verification data
    */
   async diceRoll(amountSol: number, target: DiceTarget): Promise<GameResult> {
+    await this.ensureAgentStats();
     const clientSeed = this.generateClientSeed();
     const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
@@ -395,6 +548,7 @@ export class AgentCasino {
    * @returns Game result with verification data
    */
   async limbo(amountSol: number, targetMultiplier: number): Promise<GameResult> {
+    await this.ensureAgentStats();
     if (targetMultiplier < 1.01 || targetMultiplier > 100) {
       throw new Error('Target multiplier must be between 1.01 and 100');
     }
@@ -443,6 +597,7 @@ export class AgentCasino {
    * @returns Game result with crash point
    */
   async crash(amountSol: number, cashoutMultiplier: number): Promise<GameResult> {
+    await this.ensureAgentStats();
     if (cashoutMultiplier < 1.01 || cashoutMultiplier > 100) {
       throw new Error('Cashout multiplier must be between 1.01 and 100');
     }
@@ -601,6 +756,7 @@ export class AgentCasino {
    * Add liquidity to become the house
    */
   async addLiquidity(amountSol: number): Promise<string> {
+    await this.initLpPosition();
     const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
     const [lpPositionPda] = PublicKey.findProgramAddressSync(
@@ -1021,6 +1177,7 @@ export class AgentCasino {
     providerAta?: string | PublicKey
   ): Promise<string> {
     const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
+    await this.initTokenLpPosition(mintPubkey);
     const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
 
     const [lpPositionPda] = PublicKey.findProgramAddressSync(
@@ -1075,6 +1232,7 @@ export class AgentCasino {
     choice: CoinChoice,
     playerAta?: string | PublicKey
   ): Promise<TokenGameResult> {
+    await this.ensureAgentStats();
     const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
     const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
     const choiceNum = choice === 'heads' ? 0 : 1;

@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use anchor_spl::token::{self, Token, Transfer};
+use solana_sha256_hasher::hash;
 use switchboard_on_demand::RandomnessAccountData;
 
 declare_id!("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
@@ -51,6 +52,33 @@ pub mod agent_casino {
         Ok(())
     }
 
+    /// Initialize agent stats account (must be called before first game)
+    pub fn init_agent_stats(ctx: Context<InitAgentStats>) -> Result<()> {
+        let stats = &mut ctx.accounts.agent_stats;
+        stats.agent = ctx.accounts.player.key();
+        stats.bump = ctx.bumps.agent_stats;
+        Ok(())
+    }
+
+    /// Initialize LP position account (must be called before first add_liquidity)
+    pub fn init_lp_position(ctx: Context<InitLpPosition>) -> Result<()> {
+        let lp = &mut ctx.accounts.lp_position;
+        lp.provider = ctx.accounts.provider.key();
+        lp.house = ctx.accounts.house.key();
+        lp.bump = ctx.bumps.lp_position;
+        Ok(())
+    }
+
+    /// Initialize token LP position account (must be called before first token_add_liquidity)
+    pub fn init_token_lp_position(ctx: Context<InitTokenLpPosition>) -> Result<()> {
+        let lp = &mut ctx.accounts.lp_position;
+        lp.provider = ctx.accounts.provider.key();
+        lp.vault = ctx.accounts.token_vault.key();
+        lp.mint = ctx.accounts.mint.key();
+        lp.bump = ctx.bumps.lp_position;
+        Ok(())
+    }
+
     /// Add liquidity to the house pool
     pub fn add_liquidity(ctx: Context<AddLiquidity>, amount: u64) -> Result<()> {
         require!(amount > 0, CasinoError::InvalidAmount);
@@ -66,11 +94,7 @@ pub mod agent_casino {
         system_program::transfer(cpi_context, amount)?;
 
         let lp_position = &mut ctx.accounts.lp_position;
-        if lp_position.provider == Pubkey::default() {
-            lp_position.provider = ctx.accounts.provider.key();
-            lp_position.house = ctx.accounts.house.key();
-            lp_position.bump = ctx.bumps.lp_position;
-        }
+        // lp_position already initialized via init_lp_position
         lp_position.deposited = lp_position.deposited.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         let house = &mut ctx.accounts.house;
@@ -146,10 +170,7 @@ pub mod agent_casino {
 
         // Update agent stats
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.player.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -249,10 +270,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.player.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -356,10 +374,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.player.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -465,10 +480,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.player.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -711,12 +723,8 @@ pub mod agent_casino {
             challenger_stats.losses += 1;
         }
 
-        // Update acceptor stats
+        // Update acceptor stats (already initialized via init_agent_stats)
         let acceptor_stats = &mut ctx.accounts.acceptor_stats;
-        if acceptor_stats.agent == Pubkey::default() {
-            acceptor_stats.agent = ctx.accounts.acceptor.key();
-            acceptor_stats.bump = ctx.bumps.acceptor_stats;
-        }
         acceptor_stats.total_games = acceptor_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
@@ -977,7 +985,7 @@ pub mod agent_casino {
         let mut preimage = Vec::with_capacity(project_bytes.len() + 32);
         preimage.extend_from_slice(project_bytes);
         preimage.extend_from_slice(&salt);
-        let computed_hash = mix_bytes(&preimage);
+        let computed_hash = hash(&preimage).to_bytes();
         require!(computed_hash == bet.commitment, CasinoError::InvalidReveal);
 
         let amount = bet.amount;
@@ -1229,10 +1237,7 @@ pub mod agent_casino {
 
         // Update agent stats
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = bettor_key;
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_won = agent_stats.total_won.checked_add(net_winnings).ok_or(CasinoError::MathOverflow)?;
         agent_stats.wins += 1;
 
@@ -2018,14 +2023,8 @@ pub mod agent_casino {
         let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
         token::transfer(cpi_ctx, amount)?;
 
-        // Update LP position
+        // Update LP position (already initialized via init_token_lp_position)
         let lp_position = &mut ctx.accounts.lp_position;
-        if lp_position.provider == Pubkey::default() {
-            lp_position.provider = ctx.accounts.provider.key();
-            lp_position.vault = ctx.accounts.token_vault.key();
-            lp_position.mint = ctx.accounts.mint.key();
-            lp_position.bump = ctx.bumps.lp_position;
-        }
         lp_position.deposited = lp_position.deposited.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
 
         // Update vault pool
@@ -2120,10 +2119,7 @@ pub mod agent_casino {
 
         // Update agent stats (shared with SOL games)
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = ctx.accounts.player.key();
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -2267,10 +2263,7 @@ pub mod agent_casino {
 
         // Update agent stats
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = vrf_request.player;
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -2400,10 +2393,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = vrf_request.player;
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -2535,10 +2525,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = vrf_request.player;
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -2671,10 +2658,7 @@ pub mod agent_casino {
         }
 
         let agent_stats = &mut ctx.accounts.agent_stats;
-        if agent_stats.agent == Pubkey::default() {
-            agent_stats.agent = vrf_request.player;
-            agent_stats.bump = ctx.bumps.agent_stats;
-        }
+        // agent_stats already initialized via init_agent_stats
         agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         agent_stats.total_wagered = agent_stats.total_wagered.checked_add(vrf_request.amount).ok_or(CasinoError::MathOverflow)?;
         if won {
@@ -2918,6 +2902,53 @@ pub mod agent_casino {
         Ok(())
     }
 
+    // === Close Instructions (rent recovery) ===
+
+    /// Close a settled game record to recover rent
+    pub fn close_game_record(_ctx: Context<CloseGameRecord>, _game_index: u64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a settled VRF request to recover rent
+    pub fn close_vrf_request(_ctx: Context<CloseVrfRequest>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a completed or cancelled challenge to recover rent
+    pub fn close_challenge(_ctx: Context<CloseChallenge>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a settled or cancelled price prediction to recover rent
+    pub fn close_price_prediction_account(_ctx: Context<ClosePricePrediction>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a claimed prediction bet to recover rent
+    pub fn close_prediction_bet(_ctx: Context<ClosePredictionBet>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a settled token game record to recover rent
+    pub fn close_token_game_record(_ctx: Context<CloseTokenGameRecord>, _game_index: u64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close an inactive memory to recover rent
+    pub fn close_memory(_ctx: Context<CloseMemory>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a rated memory pull to recover rent
+    pub fn close_memory_pull(_ctx: Context<CloseMemoryPull>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Close a completed or cancelled hit to recover rent
+    pub fn close_hit(_ctx: Context<CloseHit>) -> Result<()> {
+        Ok(())
+    }
+
     /// Cancel an unmatched price prediction
     pub fn cancel_price_prediction(ctx: Context<CancelPricePrediction>) -> Result<()> {
         let prediction = &ctx.accounts.price_prediction;
@@ -2951,25 +2982,6 @@ pub mod agent_casino {
 
 // === Helper Functions ===
 
-/// Simple deterministic mixing function for seed generation
-fn mix_bytes(data: &[u8]) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    for (i, byte) in data.iter().enumerate() {
-        let idx = i % 32;
-        result[idx] = result[idx].wrapping_add(*byte);
-        result[(idx + 1) % 32] = result[(idx + 1) % 32].wrapping_mul(result[idx].wrapping_add(1));
-        result[(idx + 7) % 32] ^= byte.wrapping_add(i as u8);
-    }
-    // Additional mixing rounds
-    for round in 0..4 {
-        for i in 0..32 {
-            result[i] = result[i].wrapping_add(result[(i + round + 1) % 32]);
-            result[(i + 13) % 32] ^= result[i].rotate_left(3);
-        }
-    }
-    result
-}
-
 fn generate_seed(player: Pubkey, slot: u64, timestamp: i64, house: Pubkey) -> [u8; 32] {
     let data = [
         player.to_bytes().as_ref(),
@@ -2977,7 +2989,7 @@ fn generate_seed(player: Pubkey, slot: u64, timestamp: i64, house: Pubkey) -> [u
         &timestamp.to_le_bytes(),
         house.to_bytes().as_ref(),
     ].concat();
-    mix_bytes(&data)
+    hash(&data).to_bytes()
 }
 
 fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 32] {
@@ -2986,7 +2998,7 @@ fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 3
         client.as_ref(),
         player.to_bytes().as_ref(),
     ].concat();
-    mix_bytes(&combined)
+    hash(&combined).to_bytes()
 }
 
 fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
@@ -2997,37 +3009,25 @@ fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
 }
 
 fn calculate_limbo_result(raw: u32, house_edge_bps: u16) -> u16 {
-    let max = u32::MAX as f64;
-    let normalized = raw as f64 / max;
-    let edge_factor = 1.0 - (house_edge_bps as f64 / 10000.0);
-    let result = (edge_factor / (1.0 - normalized * 0.99)) * 100.0;
-    (result.min(10000.0) as u16).max(100)
+    // Fixed-point integer math (no f64) — all scaled by 10000 BPS
+    let normalized_bps = (raw as u128 * 9900) / (u32::MAX as u128); // 0-9900
+    let denominator = 10000u128.saturating_sub(normalized_bps);       // 100-10000
+    if denominator == 0 { return 10000; }
+    let edge_factor = 10000u128 - house_edge_bps as u128;            // e.g. 9900 for 1% edge
+    let result = (edge_factor * 100) / denominator;                   // multiplier * 100
+    (result.min(10000) as u16).max(100)
 }
 
-/// Calculate crash point using exponential distribution
-/// This creates the classic Crash game feel where most games crash early
-/// but occasionally can go very high. Uses formula: crash_point = 99 / (1 - e)
-/// where e is the normalized random value, giving ~1% house edge
+/// Calculate crash point using exponential distribution (fixed-point integer math)
+/// Returns multiplier as u16 (100 = 1.00x, 200 = 2.00x, etc.)
 fn calculate_crash_point(raw: u32, house_edge_bps: u16) -> u16 {
-    let max = u32::MAX as f64;
-    let normalized = raw as f64 / max;
-
-    // Classic crash formula with house edge adjustment
-    // Base formula: 99 / (1 - normalized * 0.99)
-    // This creates exponential distribution with 1% built-in edge
-    let edge_factor = 1.0 - (house_edge_bps as f64 / 10000.0);
-
-    // Crash point calculation - inverse exponential distribution
-    // Most games crash between 1x-3x, but can occasionally go 50x+
-    let divisor = 1.0 - (normalized * 0.99);
-    let crash_multiplier = if divisor > 0.001 {
-        (99.0 * edge_factor / divisor)
-    } else {
-        10000.0 // Cap at 100x for edge cases
-    };
-
-    // Return as integer (100 = 1.00x, 200 = 2.00x, etc.)
-    (crash_multiplier.min(10000.0) as u16).max(100)
+    // Fixed-point integer math (no f64) — all scaled by 10000 BPS
+    let normalized_bps = (raw as u128 * 9900) / (u32::MAX as u128); // 0-9900
+    let denominator = 10000u128.saturating_sub(normalized_bps);       // 100-10000
+    if denominator < 10 { return 10000; } // cap at 100x for edge cases
+    let edge_factor = 10000u128 - house_edge_bps as u128;            // e.g. 9900 for 1% edge
+    let result = (edge_factor * 99) / denominator;
+    (result.min(10000) as u16).max(100)
 }
 
 // === Account Structures ===
@@ -3055,6 +3055,68 @@ pub struct InitializeHouse<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// === Init Account Contexts ===
+
+#[derive(Accounts)]
+pub struct InitAgentStats<'info> {
+    #[account(
+        init,
+        payer = player,
+        space = 8 + AgentStats::INIT_SPACE,
+        seeds = [b"agent", player.key().as_ref()],
+        bump
+    )]
+    pub agent_stats: Account<'info, AgentStats>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InitLpPosition<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = provider,
+        space = 8 + LpPosition::INIT_SPACE,
+        seeds = [b"lp", house.key().as_ref(), provider.key().as_ref()],
+        bump
+    )]
+    pub lp_position: Account<'info, LpPosition>,
+
+    #[account(mut)]
+    pub provider: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InitTokenLpPosition<'info> {
+    #[account(
+        seeds = [b"token_vault", mint.key().as_ref()],
+        bump = token_vault.bump
+    )]
+    pub token_vault: Account<'info, TokenVault>,
+
+    /// CHECK: token mint
+    pub mint: UncheckedAccount<'info>,
+
+    #[account(
+        init,
+        payer = provider,
+        space = 8 + TokenLpPosition::INIT_SPACE,
+        seeds = [b"token_lp", token_vault.key().as_ref(), provider.key().as_ref()],
+        bump
+    )]
+    pub lp_position: Account<'info, TokenLpPosition>,
+
+    #[account(mut)]
+    pub provider: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(Accounts)]
 pub struct AddLiquidity<'info> {
     #[account(mut, seeds = [b"house"], bump = house.bump)]
@@ -3069,11 +3131,9 @@ pub struct AddLiquidity<'info> {
     pub house_vault: AccountInfo<'info>,
 
     #[account(
-        init_if_needed,
-        payer = provider,
-        space = 8 + LpPosition::INIT_SPACE,
+        mut,
         seeds = [b"lp", house.key().as_ref(), provider.key().as_ref()],
-        bump
+        bump = lp_position.bump
     )]
     pub lp_position: Account<'info, LpPosition>,
 
@@ -3105,11 +3165,9 @@ pub struct PlayGame<'info> {
     pub game_record: Account<'info, GameRecord>,
 
     #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", player.key().as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3180,20 +3238,16 @@ pub struct AcceptChallenge<'info> {
     pub challenger: AccountInfo<'info>,
 
     #[account(
-        init_if_needed,
-        payer = acceptor,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", challenge.challenger.as_ref()],
-        bump
+        bump = challenger_stats.bump
     )]
     pub challenger_stats: Account<'info, AgentStats>,
 
     #[account(
-        init_if_needed,
-        payer = acceptor,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", acceptor.key().as_ref()],
-        bump
+        bump = acceptor_stats.bump
     )]
     pub acceptor_stats: Account<'info, AgentStats>,
 
@@ -3348,11 +3402,9 @@ pub struct ClaimPredictionWinnings<'info> {
     pub bet: Account<'info, PredictionBet>,
 
     #[account(
-        init_if_needed,
-        payer = bettor,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", bettor.key().as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3640,8 +3692,7 @@ pub struct VerifyHit<'info> {
     /// CHECK: Hunter account to receive payout - validated against hit
     #[account(
         mut,
-        constraint = hit.hunter.is_some() @ CasinoError::HitNotClaimed,
-        constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter
+        constraint = hit.hunter.map_or(false, |h| hunter.key() == h) @ CasinoError::NotTheHunter
     )]
     pub hunter: AccountInfo<'info>,
 
@@ -3738,8 +3789,7 @@ pub struct ArbitrateHit<'info> {
     /// CHECK: Hunter account for potential payout - validated against hit
     #[account(
         mut,
-        constraint = hit.hunter.is_some() @ CasinoError::HitNotClaimed,
-        constraint = hunter.key() == hit.hunter.unwrap() @ CasinoError::NotTheHunter
+        constraint = hit.hunter.map_or(false, |h| hunter.key() == h) @ CasinoError::NotTheHunter
     )]
     pub hunter: AccountInfo<'info>,
 
@@ -3805,11 +3855,9 @@ pub struct TokenAddLiquidity<'info> {
     pub vault_ata: UncheckedAccount<'info>,
 
     #[account(
-        init_if_needed,
-        payer = provider,
-        space = 8 + TokenLpPosition::INIT_SPACE,
+        mut,
         seeds = [b"token_lp", token_vault.key().as_ref(), provider.key().as_ref()],
-        bump
+        bump = lp_position.bump
     )]
     pub lp_position: Account<'info, TokenLpPosition>,
 
@@ -3853,11 +3901,9 @@ pub struct TokenCoinFlip<'info> {
     pub game_record: Account<'info, TokenGameRecord>,
 
     #[account(
-        init_if_needed,
-        payer = player,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", player.key().as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3909,11 +3955,9 @@ pub struct VrfCoinFlipSettle<'info> {
     pub vrf_request: Account<'info, VrfRequest>,
 
     #[account(
-        init_if_needed,
-        payer = settler,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3967,11 +4011,9 @@ pub struct VrfDiceRollSettle<'info> {
     pub vrf_request: Account<'info, VrfRequest>,
 
     #[account(
-        init_if_needed,
-        payer = settler,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4025,11 +4067,9 @@ pub struct VrfLimboSettle<'info> {
     pub vrf_request: Account<'info, VrfRequest>,
 
     #[account(
-        init_if_needed,
-        payer = settler,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4083,11 +4123,9 @@ pub struct VrfCrashSettle<'info> {
     pub vrf_request: Account<'info, VrfRequest>,
 
     #[account(
-        init_if_needed,
-        payer = settler,
-        space = 8 + AgentStats::INIT_SPACE,
+        mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump
+        bump = agent_stats.bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4961,6 +4999,185 @@ pub struct PricePredictionCancelled {
     pub refund: u64,
 }
 
+// === Close Account Contexts (rent recovery) ===
+
+#[derive(Accounts)]
+#[instruction(game_index: u64)]
+pub struct CloseGameRecord<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        close = recipient,
+        seeds = [b"game", house.key().as_ref(), &game_index.to_le_bytes()],
+        bump = game_record.bump,
+    )]
+    pub game_record: Account<'info, GameRecord>,
+
+    /// CHECK: Rent recipient
+    #[account(mut)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseVrfRequest<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        close = recipient,
+        constraint = vrf_request.status != VrfStatus::Pending @ CasinoError::NotCloseable,
+    )]
+    pub vrf_request: Account<'info, VrfRequest>,
+
+    /// CHECK: Rent recipient
+    #[account(mut)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseChallenge<'info> {
+    #[account(
+        mut,
+        close = recipient,
+        constraint = challenge.status != ChallengeStatus::Open @ CasinoError::NotCloseable,
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    /// CHECK: Rent recipient (challenger gets rent back)
+    #[account(mut, constraint = recipient.key() == challenge.challenger @ CasinoError::NotChallengeOwner)]
+    pub recipient: AccountInfo<'info>,
+
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePricePrediction<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        close = recipient,
+        constraint = price_prediction.status == PredictionStatus::Settled
+            || price_prediction.status == PredictionStatus::Cancelled
+            @ CasinoError::NotCloseable,
+    )]
+    pub price_prediction: Account<'info, PricePrediction>,
+
+    /// CHECK: Rent recipient
+    #[account(mut)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePredictionBet<'info> {
+    #[account(
+        mut,
+        close = bettor,
+        constraint = bet.claimed @ CasinoError::NotCloseable,
+        constraint = bet.bettor == bettor.key() @ CasinoError::NotBetOwner,
+    )]
+    pub bet: Account<'info, PredictionBet>,
+
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(game_index: u64)]
+pub struct CloseTokenGameRecord<'info> {
+    #[account(
+        seeds = [b"token_vault", mint.key().as_ref()],
+        bump = token_vault.bump,
+    )]
+    pub token_vault: Account<'info, TokenVault>,
+
+    /// CHECK: token mint
+    pub mint: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        close = recipient,
+        seeds = [b"token_game", token_vault.key().as_ref(), &game_index.to_le_bytes()],
+        bump = game_record.bump,
+    )]
+    pub game_record: Account<'info, TokenGameRecord>,
+
+    /// CHECK: Rent recipient
+    #[account(mut)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == token_vault.authority @ CasinoError::NotAuthority)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseMemory<'info> {
+    #[account(seeds = [b"memory_pool"], bump = memory_pool.bump)]
+    pub memory_pool: Account<'info, MemoryPool>,
+
+    #[account(
+        mut,
+        close = depositor,
+        constraint = !memory.active @ CasinoError::NotCloseable,
+        constraint = memory.depositor == depositor.key() @ CasinoError::NotMemoryOwner,
+        seeds = [b"memory", memory_pool.key().as_ref(), &memory.index.to_le_bytes()],
+        bump = memory.bump,
+    )]
+    pub memory: Account<'info, Memory>,
+
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseMemoryPull<'info> {
+    #[account(
+        mut,
+        close = puller,
+        constraint = memory_pull.rating.is_some() @ CasinoError::NotCloseable,
+        constraint = memory_pull.puller == puller.key() @ CasinoError::NotPullOwner,
+    )]
+    pub memory_pull: Account<'info, MemoryPull>,
+
+    #[account(mut)]
+    pub puller: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseHit<'info> {
+    #[account(seeds = [b"hit_pool"], bump = hit_pool.bump)]
+    pub hit_pool: Account<'info, HitPool>,
+
+    #[account(
+        mut,
+        close = recipient,
+        constraint = hit.status == HitStatus::Completed || hit.status == HitStatus::Cancelled @ CasinoError::NotCloseable,
+        constraint = hit.pool == hit_pool.key() @ CasinoError::HitPoolMismatch,
+        seeds = [b"hit", hit_pool.key().as_ref(), &hit.hit_index.to_le_bytes()],
+        bump = hit.bump,
+    )]
+    pub hit: Account<'info, Hit>,
+
+    /// CHECK: Rent recipient (poster gets rent back)
+    #[account(mut, constraint = recipient.key() == hit.poster @ CasinoError::NotHitPoster)]
+    pub recipient: AccountInfo<'info>,
+
+    pub authority: Signer<'info>,
+}
+
 // === Errors ===
 
 #[error_code]
@@ -5141,4 +5358,8 @@ pub enum CasinoError {
     InvalidTarget,
     #[msg("Invalid multiplier (must be 101-10000)")]
     InvalidMultiplier,
+    #[msg("Not the house authority")]
+    NotAuthority,
+    #[msg("Account is not in a closeable state")]
+    NotCloseable,
 }

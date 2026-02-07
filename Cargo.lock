@@ -44,6 +44,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "solana-hash",
+ "solana-sha256-hasher",
  "switchboard-on-demand",
 ]
 

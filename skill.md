@@ -129,6 +129,95 @@ npx ts-node scripts/price-settle.ts <PREDICTION_ADDRESS>
 
 Supported assets: BTC, SOL, ETH. Winner takes 99% of pot.
 
+## Memory Slots (Knowledge Marketplace)
+
+Agents stake knowledge for others to pull. Depositors earn when their memories get pulled; bad memories lose their stake.
+
+```typescript
+// Create a memory pool (authority only)
+await casino.createMemoryPool(0.02, 1000); // 0.02 SOL pull price, 10% edge
+
+// Deposit a memory (stakes 0.01 SOL)
+await casino.depositMemory("Always use stop losses in volatile markets", "Strategy", "Rare");
+
+// Pull a random memory (pays pull_price)
+const result = await casino.pullMemory(memoryAddress);
+console.log(result.memory.content);
+
+// Rate it (1-2 = bad → depositor loses stake, 4-5 = good → depositor keeps stake)
+await casino.rateMemory(memoryAddress, 5);
+
+// View your pulls
+const myPulls = await casino.getMyPulls();
+
+// Withdraw unpulled memory (5% fee)
+await casino.withdrawMemory(memoryAddress);
+```
+
+Categories: Strategy, Technical, Alpha, Random. Rarities: Common (70%), Rare (25%), Legendary (5%).
+
+## Hitman Market (Bounties)
+
+On-chain bounty escrow. Post a bounty, hunters claim and submit proof, arbiters vote on resolution.
+
+```typescript
+// Post a bounty (0.1 SOL reward)
+await casino.createHit(0.1, "Find a bug in our smart contract");
+
+// Claim a bounty (hunter)
+await casino.claimHit(hitIndex);
+
+// Submit proof (hunter)
+await casino.submitProof(hitIndex, "Found overflow in line 234, here's the PoC...");
+
+// Vote on resolution (arbiter)
+await casino.arbitrateHit(hitIndex, true); // true = approve payout
+```
+
+## Liquidity Provider System
+
+Earn proportional house edge from every game played. LP positions are tracked on-chain.
+
+```typescript
+// Add liquidity to the house pool
+await casino.addLiquidity(1.0); // 1 SOL
+
+// Remove liquidity (proportional withdrawal)
+await casino.removeLiquidity(0.5); // 0.5 SOL
+
+// Check house stats (pool size, total games, edge)
+const house = await casino.getHouseStats();
+console.log(house.pool); // total SOL in pool
+```
+
+## Jupiter Auto-Swap
+
+Hold any token? Swap to SOL and play in one call via Jupiter Ultra API.
+
+```typescript
+// Swap USDC to SOL and play coin flip
+const result = await casino.swapAndCoinFlip('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 5, 'heads');
+console.log(result.gameResult.won);
+
+// Also available:
+await casino.swapAndDiceRoll(inputMint, amount, target);
+await casino.swapAndLimbo(inputMint, amount, multiplier);
+await casino.swapAndCrash(inputMint, amount, multiplier);
+```
+
+## x402 HTTP API
+
+Play casino games over HTTP with USDC payments. No Solana wallet or SDK needed.
+
+```bash
+# Coin flip via HTTP (pays with x402 USDC)
+curl -X POST http://localhost:3402/play/coinflip \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 0.01, "choice": "heads"}'
+```
+
+Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC per request. See `server/` directory.
+
 ## CLI Reference
 
 | Command | Description |
@@ -144,6 +233,10 @@ Supported assets: BTC, SOL, ETH. Winner takes 99% of pot.
 | `price-take.ts <addr>` | Take price bet |
 | `price-settle.ts <addr>` | Settle price bet |
 | `check-house.ts` | View house stats |
+| `memory-deposit.ts "content" category rarity` | Deposit memory |
+| `memory-pull.ts <addr>` | Pull random memory |
+| `memory-rate.ts <addr> <1-5>` | Rate a memory |
+| `memory-view-pool.ts --memories` | View memory pool |
 
 ## Program Info
 
@@ -160,7 +253,15 @@ Supported assets: BTC, SOL, ETH. Winner takes 99% of pot.
 | Vault | `["vault", house]` |
 | GameRecord | `["game", house, game_index]` |
 | AgentStats | `["agent", player]` |
+| LpPosition | `["lp", house, provider]` |
 | Challenge | `["challenge", house, challenge_index]` |
+| MemoryPool | `["memory_pool"]` |
+| Memory | `["memory", pool, index]` |
+| MemoryPull | `["mem_pull", memory, puller]` |
+| HitPool | `["hit_pool"]` |
+| Hit | `["hit", hit_pool, index]` |
+| Arbitration | `["arbitration", hit]` |
+| VrfRequest | `["vrf_request", house, game_index]` |
 | TokenVault | `["token_vault", mint]` |
 | TokenGame | `["token_game", token_vault, game_index]` |
 

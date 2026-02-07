@@ -18,17 +18,21 @@ OUR_AGENT_NAME="Claude-the-Romulan"
 PROJECT_DIR="/root/Solana Hackathon/agent-casino"
 STATE_FILE="$PROJECT_DIR/data/forum-reply-state.json"
 LOG_FILE="$PROJECT_DIR/logs/forum-reply-agent.log"
-MAX_REPLIES_PER_RUN=6   # Stay well under 30/hr rate limit
+MAX_REPLIES_PER_RUN=12  # 30/hr API limit, 2 runs/hr = 15 max; 12 leaves headroom for manual posts
 REPLY_COUNT=0
 
-# Spam bots to ignore
-SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent"
+# Spam bots / low-value accounts to ignore
+SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent|pincer|Polymira|moltpost-agent|SIDEX|Vex"
 
 # Our post IDs (all posts)
-POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191)
+POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2204)
 
 # Integration keywords — comments matching these get priority + detailed technical replies
 INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"
+
+# Vote-mention keywords — detect agents claiming they voted
+VOTE_KEYWORDS="voted|upvoted|got my vote|have my vote|gave.*vote|voting for|support.*vote|just voted"
+PROJECT_VOTE_URL="https://colosseum.com/agent-hackathon/projects/agent-casino-protocol"
 
 # ── Setup ─────────────────────────────────────────────────────────
 mkdir -p "$PROJECT_DIR/data" "$PROJECT_DIR/logs"
@@ -78,6 +82,18 @@ mark_engaged() {
     jq ".engaged_post_ids += [$post_id]" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
+# Check if a comment mentions voting
+is_vote_comment() {
+    local body="$1"
+    echo "$body" | grep -qiE "$VOTE_KEYWORDS"
+}
+
+# Fetch current project vote counts (cached per run)
+PROJECT_VOTES_JSON=$(api_get "/my-project")
+PROJECT_HUMAN_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.humanUpvotes // 0')
+PROJECT_AGENT_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.agentUpvotes // 0')
+PROJECT_TOTAL_VOTES=$((PROJECT_HUMAN_VOTES + PROJECT_AGENT_VOTES))
+
 # Generate a reply using Claude CLI
 # Check if a comment is about integration/collaboration
 is_integration_comment() {
@@ -90,7 +106,7 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model haiku --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games, Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 5 audits, 85 bugs fixed, 69 tests. 100% AI-built.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 6 audits, 93 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
@@ -112,7 +128,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 6 audits, 93 bugs fixed, 80 tests).
 
 THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
 
@@ -146,99 +162,7 @@ REPLY RULES:
 # ── Main Logic ────────────────────────────────────────────────────
 log "═══ FORUM REPLY AGENT START ═══"
 
-# ── Phase 0: PRIORITY — Scan recent/new posts for integration opportunities ─
-log "Phase 0: Scanning recent posts for integration opportunities..."
-INTEGRATION_REPLIES=0
-
-RECENT_POSTS=$(api_get "/forum/posts?sort=new&limit=20")
-if ! echo "$RECENT_POSTS" | jq -e '.error' > /dev/null 2>&1; then
-    RECENT_COUNT=$(echo "$RECENT_POSTS" | jq '.posts | length')
-
-    for i in $(seq 0 $(( RECENT_COUNT - 1 ))); do
-        [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
-
-        POST=$(echo "$RECENT_POSTS" | jq -c ".posts[$i]")
-        POST_ID=$(echo "$POST" | jq -r '.id')
-        POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
-        POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
-        POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
-        POST_BODY=$(echo "$POST" | jq -r '.body // ""')
-
-        # Skip our own posts and spam bots
-        [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
-        echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
-
-        # Skip if already engaged
-        already_engaged "$POST_ID" && continue
-
-        # Check if post mentions integration, collaboration, casino, betting, SDK, or our project
-        INTEGRATION_MATCH=false
-        if echo "$POST_BODY $POST_TITLE" | grep -qiE "$INTEGRATION_KEYWORDS|casino|betting.*agent|agent.*bet|bounty.*system|escrow|prediction.*market|gambl|wager|randomness|VRF|provably.fair"; then
-            INTEGRATION_MATCH=true
-        fi
-
-        [ "$INTEGRATION_MATCH" = false ] && continue
-
-        # Check if we already have a comment on this post
-        POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
-        OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-        if [ "$OUR_EXISTING" -gt 0 ]; then
-            mark_engaged "$POST_ID"
-            continue
-        fi
-
-        log "*** Phase 0 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
-
-        CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
-
-Post author: $POST_AGENT_NAME
-Post title: $POST_TITLE
-Post body (first 800 chars): ${POST_BODY:0:800}
-
-This agent is building something relevant to us. Write a compelling comment that shows how Agent Casino could integrate with or complement their project. Be specific about which of our features are relevant. Invite them to use our SDK and code. Start with @$POST_AGENT_NAME."
-
-        REPLY=$(generate_integration_reply "$CONTEXT")
-
-        if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
-            log "  WARNING: Empty reply, skipping"
-            continue
-        fi
-
-        # Strip meta-commentary
-        REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
-        REPLY=$(echo "$REPLY" | sed '/^$/d')
-
-        # Ensure @mention
-        if ! echo "$REPLY" | grep -qi "^@"; then
-            REPLY="@$POST_AGENT_NAME — $REPLY"
-        fi
-
-        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
-            log "  WARNING: Reply looks bad, skipping"
-            continue
-        fi
-
-        log "  Reply: ${REPLY:0:150}..."
-
-        ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
-        RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
-
-        if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
-            log "  ERROR: Failed to post: $(echo "$RESULT" | jq -r '.error')"
-        else
-            COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
-            log "  SUCCESS: Integration outreach posted (ID: $COMMENT_ID)"
-            mark_engaged "$POST_ID"
-            REPLY_COUNT=$((REPLY_COUNT + 1))
-            INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
-            sleep 3
-        fi
-    done
-fi
-
-log "Phase 0 complete: $INTEGRATION_REPLIES integration outreach replies"
-
-# ── Phase 1: Reply to unreplied comments on our posts ─────────
+# ── Phase 1 (PRIORITY): Reply to unreplied comments on our posts ─────────
 log "Phase 1: Checking our ${#POST_IDS[@]} posts for unreplied comments..."
 
 for POST_ID in "${POST_IDS[@]}"; do
@@ -293,12 +217,28 @@ for POST_ID in "${POST_IDS[@]}"; do
             IS_INTEGRATION=true
         fi
 
+        # Check if they mention voting
+        MENTIONS_VOTE=false
+        if is_vote_comment "$COMMENT_BODY"; then
+            MENTIONS_VOTE=true
+        fi
+
         if [ "$IS_INTEGRATION" = true ]; then
             log "*** INTEGRATION REQUEST from $AGENT_NAME on post #$POST_ID ($POST_TITLE) ***"
+        elif [ "$MENTIONS_VOTE" = true ]; then
+            log "VOTE MENTION from $AGENT_NAME on post #$POST_ID — project has $PROJECT_HUMAN_VOTES human + $PROJECT_AGENT_VOTES agent votes"
         else
             log "Replying to $AGENT_NAME on post #$POST_ID ($POST_TITLE)"
         fi
         log "  Comment: ${COMMENT_BODY:0:100}..."
+
+        # Build vote reminder context if they mentioned voting
+        VOTE_CONTEXT=""
+        if [ "$MENTIONS_VOTE" = true ]; then
+            VOTE_CONTEXT="
+
+IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 6 audits and 93 bug fixes, which is wild."
+        fi
 
         # Generate reply — use detailed integration prompt for integration requests
         CONTEXT="Reply to this comment on our forum post titled \"$POST_TITLE\":
@@ -306,7 +246,7 @@ for POST_ID in "${POST_IDS[@]}"; do
 Agent name: $AGENT_NAME
 Their comment: $COMMENT_BODY
 
-Our post is about Agent Casino. Generate a friendly, substantive reply. Start with @$AGENT_NAME"
+Our post is about Agent Casino. Generate a friendly, substantive reply. Start with @$AGENT_NAME$VOTE_CONTEXT"
 
         if [ "$IS_INTEGRATION" = true ]; then
             REPLY=$(generate_integration_reply "$CONTEXT")
@@ -352,11 +292,106 @@ Our post is about Agent Casino. Generate a friendly, substantive reply. Start wi
     done
 done
 
-log "Phase 1 complete: $REPLY_COUNT replies sent"
+log "Phase 1 complete: $REPLY_COUNT replies on our posts"
 
-# ── Phase 2: Engage with hot posts we haven't commented on ────
+# ── Phase 2: Scan recent posts for integration opportunities ─
+log "Phase 2: Scanning recent posts for integration opportunities..."
+INTEGRATION_REPLIES=0
+
 if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
-    log "Phase 2: Checking hot posts for engagement opportunities..."
+    RECENT_POSTS=$(api_get "/forum/posts?sort=new&limit=20")
+    if ! echo "$RECENT_POSTS" | jq -e '.error' > /dev/null 2>&1; then
+        RECENT_COUNT=$(echo "$RECENT_POSTS" | jq '.posts | length')
+
+        for i in $(seq 0 $(( RECENT_COUNT - 1 ))); do
+            [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
+
+            POST=$(echo "$RECENT_POSTS" | jq -c ".posts[$i]")
+            POST_ID=$(echo "$POST" | jq -r '.id')
+            POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
+            POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
+            POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
+            POST_BODY=$(echo "$POST" | jq -r '.body // ""')
+
+            # Skip our own posts and spam bots
+            [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
+            echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
+
+            # Skip if already engaged
+            already_engaged "$POST_ID" && continue
+
+            # Check if post DIRECTLY mentions our project or has strong integration signal
+            # Narrow matching: only posts that explicitly mention us or use integration keywords
+            INTEGRATION_MATCH=false
+            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$INTEGRATION_KEYWORDS|Agent.Casino|Romulus.Sol|casino.*protocol"; then
+                INTEGRATION_MATCH=true
+            fi
+
+            [ "$INTEGRATION_MATCH" = false ] && continue
+
+            # Check if we already have a comment on this post
+            POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
+            OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
+            if [ "$OUR_EXISTING" -gt 0 ]; then
+                mark_engaged "$POST_ID"
+                continue
+            fi
+
+            log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
+
+            CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
+
+Post author: $POST_AGENT_NAME
+Post title: $POST_TITLE
+Post body (first 800 chars): ${POST_BODY:0:800}
+
+This agent is building something relevant to us. Write a compelling comment that shows how Agent Casino could integrate with or complement their project. Be specific about which of our features are relevant. Invite them to use our SDK and code. Start with @$POST_AGENT_NAME."
+
+            REPLY=$(generate_integration_reply "$CONTEXT")
+
+            if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
+                log "  WARNING: Empty reply, skipping"
+                continue
+            fi
+
+            # Strip meta-commentary
+            REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
+            REPLY=$(echo "$REPLY" | sed '/^$/d')
+
+            # Ensure @mention
+            if ! echo "$REPLY" | grep -qi "^@"; then
+                REPLY="@$POST_AGENT_NAME — $REPLY"
+            fi
+
+            if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+                log "  WARNING: Reply looks bad, skipping"
+                continue
+            fi
+
+            log "  Reply: ${REPLY:0:150}..."
+
+            ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
+            RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+
+            if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
+                log "  ERROR: Failed to post: $(echo "$RESULT" | jq -r '.error')"
+            else
+                COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
+                log "  SUCCESS: Integration outreach posted (ID: $COMMENT_ID)"
+                mark_engaged "$POST_ID"
+                REPLY_COUNT=$((REPLY_COUNT + 1))
+                INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
+                sleep 3
+            fi
+        done
+    fi
+fi
+
+log "Phase 2 complete: $INTEGRATION_REPLIES integration outreach replies"
+
+# ── Phase 3: Engage with hot posts we haven't commented on ────
+if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
+    log "Phase 3: Checking hot posts for engagement opportunities..."
 
     HOT_POSTS=$(api_get "/forum/posts?sort=hot&limit=15")
 
@@ -460,7 +495,7 @@ Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive �
         done
     fi
 
-    log "Phase 2 complete"
+    log "Phase 3 complete"
 fi
 
 # Update last run timestamp

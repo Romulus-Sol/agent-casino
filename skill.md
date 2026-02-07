@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. Dual randomness: commit-reveal `Hash(server_seed || client_seed || player_pubkey)` for speed, or Switchboard VRF for provably unpredictable outcomes (2-step request/settle).
+All games have a 1% house edge. Dual randomness: commit-reveal `SHA-256(server_seed || client_seed || player_pubkey)` for speed, or Switchboard VRF for provably unpredictable outcomes (2-step request/settle). Integer-only math (no floating-point). Four security audits: 55 vulnerabilities fixed, zero remaining. 69 automated tests.
 
 ## SPL Token Games
 

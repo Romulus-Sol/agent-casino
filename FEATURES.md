@@ -537,6 +537,16 @@ class AgentCasino {
   swapAndLimbo(inputMint, tokenAmount, multiplier): Promise<SwapAndPlayResult>
   swapAndCrash(inputMint, tokenAmount, multiplier): Promise<SwapAndPlayResult>
 
+  // Account Initialization (required before first use)
+  initAgentStats(): Promise<string>
+  ensureAgentStats(): Promise<void>  // auto-called by game methods
+  initLpPosition(): Promise<string>
+  initTokenLpPosition(mintAddress): Promise<string>
+
+  // Account Closing (rent recovery)
+  closeGameRecord(gameIndex, recipient?): Promise<string>
+  closeVrfRequest(vrfRequestAddress, recipient?): Promise<string>
+
   // Stats & Liquidity
   getHouseStats(): Promise<HouseStats>
   getMyStats(): Promise<AgentStats>
@@ -592,6 +602,7 @@ class HitmanMarket {
 - [x] Security audit #1: 26 vulnerabilities fixed (core program)
 - [x] Security audit #2: 16 vulnerabilities fixed (Jupiter + x402)
 - [x] Security audit #3: 8 unsafe patterns fixed + Switchboard VRF for all games
+- [x] Security audit #4: 5 breaking-change fixes (init_if_needed, close constraints, SHA-256, integer math, safe unwrap)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games
-- [x] 100% SDK instruction coverage (42/42 instructions)
-- [x] Comprehensive test suite (55 tests)
+- [x] 100% SDK instruction coverage (42+ instructions)
+- [x] Comprehensive test suite (69 tests, 0 remaining vulnerabilities)

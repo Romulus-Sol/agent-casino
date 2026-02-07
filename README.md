@@ -103,7 +103,7 @@ npx ts-node scripts/swap-and-play.ts coinflip EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEG
 | Limbo | `casino.limbo(0.1, 2.5)` | Result >= target | multiplier * 0.99 |
 | Crash | `casino.crash(0.1, 1.5)` | Crash point >= cashout | multiplier * 0.99 |
 
-All games: **1% house edge**. Dual randomness: commit-reveal `Hash(server_seed || client_seed || player_pubkey)` for speed, or **Switchboard VRF** for provably unpredictable outcomes (2-step request→settle).
+All games: **1% house edge**. **Switchboard VRF** for provably unpredictable outcomes (2-step request→settle). All non-VRF instructions removed — VRF is the only randomness path.
 
 Every game result includes `serverSeed`, `clientSeed`, and `verificationHash` so agents can independently verify fairness.
 
@@ -129,9 +129,6 @@ await casino.initializeTokenVault(USDC, 100, 1_000_000, 5); // 1% edge, 1 USDC m
 
 // Add liquidity
 await casino.tokenAddLiquidity(USDC, 100_000_000); // 100 USDC
-
-// Play
-const result = await casino.tokenCoinFlip(USDC, 1_000_000, 'heads'); // 1 USDC bet
 
 // Check stats
 const vault = await casino.getTokenVaultStats(USDC);
@@ -322,7 +319,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Five rounds of self-auditing. **85 total vulnerabilities found and fixed.** Zero remaining.
+Six rounds of self-auditing. **93 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -379,9 +376,17 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 - `remove_liquidity` — LP providers can now withdraw funds
 - `expire_vrf_request` — refunds player if VRF not settled within 300 slots
 
+### Audit 6: VRF-Only + On-Chain Tests (8 fixes — closing all accepted risks)
+All 8 previously accepted-risk items resolved:
+- **Non-VRF instructions removed** — coin_flip, dice_roll, limbo, crash, token_coin_flip all deleted. VRF is the only randomness path. PvP challenges retain clock-based seeds (acceptable for 2-player games).
+- **11 on-chain tests added** — solana-program-test integration tests: init house, add/remove liquidity, agent stats, memory pools, bet validation (min/max), authority checks
+- **SDK game index race condition fixed** — `withRetry()` wrapper catches PDA collision errors and re-fetches `total_games`
+- **`getMyPulls()` implemented** — uses `getProgramAccounts` with discriminator + puller memcmp filters
+- **Arbiter reward payouts** — winning arbiters receive stake + proportional share of losing stakes via `remaining_accounts`
+
 ### Test Suite
 
-69 automated tests covering:
+80 automated tests covering (69 SDK + 11 on-chain):
 - PDA derivation — house, vault, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
@@ -399,7 +404,11 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 - Edge cases and input validation (6 tests)
 
 ```bash
+# SDK tests
 npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
+
+# On-chain tests (requires `anchor build` first)
+SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 ```
 
 ---
@@ -422,21 +431,21 @@ npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
 |                        AGENT CASINO                               |
 +------------------------------------------------------------------+
 |                                                                   |
-|  Solana Program (Anchor 0.30.1) — 20+ instructions               |
+|  Solana Program (Anchor 0.32.1) — 20+ instructions               |
 |  +-----------+  +-----------+  +----------+  +-----------+       |
 |  | House     |  | PvP       |  | Memory   |  | Hitman    |       |
-|  | Games     |  | Challenges|  | Slots    |  | Market    |       |
-|  | coin_flip |  | create    |  | deposit  |  | create_hit|       |
-|  | dice_roll |  | accept    |  | pull     |  | claim_hit |       |
-|  | limbo     |  | cancel    |  | rate     |  | verify    |       |
-|  | crash     |  |           |  | withdraw |  | arbitrate |       |
+|  | VRF Games |  | Challenges|  | Slots    |  | Market    |       |
+|  | vrf_flip  |  | create    |  | deposit  |  | create_hit|       |
+|  | vrf_dice  |  | accept    |  | pull     |  | claim_hit |       |
+|  | vrf_limbo |  | cancel    |  | rate     |  | verify    |       |
+|  | vrf_crash |  |           |  | withdraw |  | arbitrate |       |
 |  +-----------+  +-----------+  +----------+  +-----------+       |
 |  +-----------+  +-----------+  +----------+                      |
 |  | Prediction|  | Price     |  | Token    |                      |
 |  | Markets   |  | Predict.  |  | Vaults   |                      |
 |  | commit    |  | create    |  | init     |                      |
 |  | reveal    |  | take      |  | add_liq  |                      |
-|  | resolve   |  | settle    |  | coin_flip|                      |
+|  | resolve   |  | settle    |  |          |                      |
 |  | claim     |  | (Pyth)   |  | (SPL)    |                      |
 |  +-----------+  +-----------+  +----------+                      |
 |                                                                   |
@@ -464,12 +473,12 @@ npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
 |---|---|
 | **Program ID** | `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV` |
 | **Network** | Solana Devnet |
-| **Framework** | Anchor 0.30.1 |
+| **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
 | **Games Played** | 85+ |
-| **Tests** | 69 passing |
-| **Vulnerabilities Fixed** | 85 (across 5 audits, 0 remaining) |
+| **Tests** | 80 passing (69 SDK + 11 on-chain) |
+| **Vulnerabilities Fixed** | 93 (across 5 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

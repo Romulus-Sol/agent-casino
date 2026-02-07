@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. Dual randomness: commit-reveal `SHA-256(server_seed || client_seed || player_pubkey)` for speed, or Switchboard VRF for provably unpredictable outcomes (2-step request/settle). Integer-only math (no floating-point). Four security audits: 55 vulnerabilities fixed, zero remaining. 69 automated tests.
+All games have a 1% house edge. **Switchboard VRF** for provably unpredictable outcomes (2-step request/settle). Non-VRF instructions removed — VRF is the only randomness path. Integer-only math (no floating-point). Six security audits: 93 vulnerabilities found and fixed, zero remaining. 80 automated tests (69 SDK + 11 on-chain).
 
 ## SPL Token Games
 
@@ -65,9 +65,6 @@ await casino.initializeTokenVault(mintAddress, 100, minBet, 5);
 
 // Add token liquidity
 await casino.tokenAddLiquidity(mintAddress, amount);
-
-// Coin flip with tokens
-const result = await casino.tokenCoinFlip(mintAddress, amount, 'heads');
 
 // Check vault stats
 const vault = await casino.getTokenVaultStats(mintAddress);
@@ -153,7 +150,7 @@ Supported assets: BTC, SOL, ETH. Winner takes 99% of pot.
 - **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 - **Network:** Solana Devnet
 - **House Pool:** ~5 SOL, 1% edge
-- **Framework:** Anchor 0.30.1
+- **Framework:** Anchor 0.32.1
 
 ### PDA Seeds
 

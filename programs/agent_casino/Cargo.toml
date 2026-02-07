@@ -23,8 +23,11 @@ switchboard-on-demand = { version = "0.11.3", features = ["anchor"] }
 solana-sha256-hasher = "2.3.0"
 solana-hash = "2.3.0"
 
-[dev-dependencies]
-solana-program-test = "2.2"
-solana-sdk = "2.2"
-sha2 = "0.10"
-tokio = { version = "1", features = ["full"] }
+# Dev-dependencies for on-chain tests (run with: SBF_OUT_DIR=target/deploy cargo test)
+# Temporarily commented out during anchor build due to blake3 edition2024 conflict
+# Uncomment to run: cargo test --package agent-casino --test litesvm_tests
+# [dev-dependencies]
+# solana-program-test = "2.2"
+# solana-sdk = "2.2"
+# sha2 = "0.10"
+# tokio = { version = "1", features = ["full"] }

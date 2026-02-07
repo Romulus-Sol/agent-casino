@@ -3421,7 +3421,7 @@ pub struct CreatePredictionMarket<'info> {
     )]
     pub market: Account<'info, PredictionMarket>,
 
-    #[account(mut)]
+    #[account(mut, constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -5326,6 +5326,7 @@ pub struct CloseHit<'info> {
     #[account(mut, constraint = recipient.key() == hit.poster @ CasinoError::NotHitPoster)]
     pub recipient: AccountInfo<'info>,
 
+    #[account(constraint = authority.key() == hit.poster @ CasinoError::NotHitPoster)]
     pub authority: Signer<'info>,
 }
 

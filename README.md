@@ -322,7 +322,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Four rounds of self-auditing. **55 total vulnerabilities found and fixed.** Zero remaining.
+Five rounds of self-auditing. **85 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -352,6 +352,32 @@ Four rounds of self-auditing. **55 total vulnerabilities found and fixed.** Zero
 - **Custom hash → SHA-256** — replaced `mix_bytes` with `solana_program::hash::hash`, now matches SDK's `verifyResult`
 - **Floating-point → integer math** — `calculate_limbo_result` and `calculate_crash_point` now use `u128` fixed-point
 - **`unwrap()` in constraints** (2 instances) — replaced with safe `map_or` pattern
+
+### Audit 5: Deep Arithmetic & Liquidity (30 vulnerabilities)
+Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, economic exploits) found 38 issues; 30 fixed, 8 accepted risk.
+
+**Critical fixes:**
+- Replaced all `amount * 2` unchecked overflow with actual `max_payout` calculations (6 locations)
+- Replaced all `payout.saturating_sub(amount)` with `checked_sub` — `saturating_sub` silently hid errors (8 locations)
+- Fixed VRF coin flip settle PDA race condition (`total_games.saturating_sub(1)` broke if another game occurred between request and settle)
+- Restricted prediction market resolution to Revealing phase only (was accepting Committing, allowing premature resolution)
+
+**High fixes:**
+- All `wins += 1` / `losses += 1` → `checked_add(1)` (12+ locations across all game types)
+- Non-VRF liquidity checks now use actual max payout (dice 6x, limbo 100x, crash 100x — not just 2x)
+- Self-arbitration prevented (poster/hunter can't vote on own disputes)
+- SDK `withdrawMemory` reads stake before tx (was reading after, always returning 0)
+
+**Medium fixes:**
+- Unchecked multiplication in memory pool fees, price prediction pools
+- Unchecked timestamp subtraction in Pyth oracle, claim expiry
+- VRF dice settle re-validates choice before division (prevented divide-by-zero)
+- SDK BN overflow protection via `safeToNumber()` for u64 values
+- SDK `verifyResult()` extended to support all 4 game types
+
+**New instructions added:**
+- `remove_liquidity` — LP providers can now withdraw funds
+- `expire_vrf_request` — refunds player if VRF not settled within 300 slots
 
 ### Test Suite
 
@@ -443,7 +469,7 @@ npx ts-mocha -p ./tsconfig.json tests/agent-casino.ts --timeout 30000
 | **House Edge** | 1% |
 | **Games Played** | 85+ |
 | **Tests** | 69 passing |
-| **Vulnerabilities Fixed** | 55 (across 4 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 85 (across 5 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

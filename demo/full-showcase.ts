@@ -473,7 +473,7 @@ async function main() {
     console.log(`    ${DIM}┌────────────────────────────────────────────────┐${R}`);
     statLine("  Total Hits      ", `${GRN}${B}${poolStats.totalHits}${R}`);
     statLine("  Completed       ", `${CYN}${B}${poolStats.totalCompleted}${R}`);
-    statLine("  Bounties Paid   ", `${GOLD}${B}${sol(poolStats.totalBountiesPaid / LAMPORTS_PER_SOL)} SOL${R}`);
+    statLine("  Bounties Paid   ", `${GOLD}${B}${sol(poolStats.totalBountiesPaid)} SOL${R}`);
     statLine("  House Edge      ", `${WHT}${B}${(poolStats.houseEdgeBps / 100).toFixed(1)}%${R}`);
     console.log(`    ${DIM}└────────────────────────────────────────────────┘${R}`);
 
@@ -482,11 +482,10 @@ async function main() {
       let totalBounty = 0;
       for (const h of openHits) totalBounty += h.bounty;
       blank();
-      console.log(`    ${B}Open Bounties${R}  ${DIM}(${openHits.length} active,${R} ${GOLD}${B}${sol(totalBounty / LAMPORTS_PER_SOL)} SOL${R} ${DIM}total)${R}`);
+      console.log(`    ${B}Open Bounties${R}  ${DIM}(${openHits.length} active,${R} ${GOLD}${B}${sol(totalBounty)} SOL${R} ${DIM}total)${R}`);
       blank();
       for (const hit of openHits.slice(0, 4)) {
-        const bounty = hit.bounty / LAMPORTS_PER_SOL;
-        console.log(`      ${RED}${B}${bounty.toFixed(3)} SOL${R}  ${DIM}→${R}  ${WHT}${hit.targetDescription.slice(0, 35)}${R}`);
+        console.log(`      ${RED}${B}${hit.bounty.toFixed(3)} SOL${R}  ${DIM}→${R}  ${WHT}${hit.targetDescription.slice(0, 35)}${R}`);
         console.log(`        ${DIM}${hit.condition.slice(0, 55)}${R}`);
       }
       if (openHits.length > 4) {

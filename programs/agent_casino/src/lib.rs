@@ -388,8 +388,8 @@ pub mod agent_casino {
         game_record.player = ctx.accounts.player.key();
         game_record.game_type = GameType::Limbo;
         game_record.amount = amount;
-        game_record.choice = (target_multiplier >> 8) as u8;
-        game_record.result = (result_multiplier >> 8) as u8;
+        game_record.choice = (target_multiplier / 100).min(255) as u8;
+        game_record.result = (result_multiplier / 100).min(255) as u8;
         game_record.payout = payout;
         game_record.server_seed = server_seed;
         game_record.client_seed = client_seed;
@@ -494,8 +494,8 @@ pub mod agent_casino {
         game_record.player = ctx.accounts.player.key();
         game_record.game_type = GameType::Crash;
         game_record.amount = amount;
-        game_record.choice = (cashout_multiplier >> 8) as u8;
-        game_record.result = (crash_point >> 8) as u8;
+        game_record.choice = (cashout_multiplier / 100).min(255) as u8;
+        game_record.result = (crash_point / 100).min(255) as u8;
         game_record.payout = payout;
         game_record.server_seed = server_seed;
         game_record.client_seed = client_seed;
@@ -3133,7 +3133,7 @@ pub struct AddLiquidity<'info> {
     #[account(
         mut,
         seeds = [b"lp", house.key().as_ref(), provider.key().as_ref()],
-        bump = lp_position.bump
+        bump
     )]
     pub lp_position: Account<'info, LpPosition>,
 
@@ -3167,7 +3167,7 @@ pub struct PlayGame<'info> {
     #[account(
         mut,
         seeds = [b"agent", player.key().as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3240,14 +3240,14 @@ pub struct AcceptChallenge<'info> {
     #[account(
         mut,
         seeds = [b"agent", challenge.challenger.as_ref()],
-        bump = challenger_stats.bump
+        bump
     )]
     pub challenger_stats: Account<'info, AgentStats>,
 
     #[account(
         mut,
         seeds = [b"agent", acceptor.key().as_ref()],
-        bump = acceptor_stats.bump
+        bump
     )]
     pub acceptor_stats: Account<'info, AgentStats>,
 
@@ -3404,7 +3404,7 @@ pub struct ClaimPredictionWinnings<'info> {
     #[account(
         mut,
         seeds = [b"agent", bettor.key().as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3857,7 +3857,7 @@ pub struct TokenAddLiquidity<'info> {
     #[account(
         mut,
         seeds = [b"token_lp", token_vault.key().as_ref(), provider.key().as_ref()],
-        bump = lp_position.bump
+        bump
     )]
     pub lp_position: Account<'info, TokenLpPosition>,
 
@@ -3903,7 +3903,7 @@ pub struct TokenCoinFlip<'info> {
     #[account(
         mut,
         seeds = [b"agent", player.key().as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -3957,7 +3957,7 @@ pub struct VrfCoinFlipSettle<'info> {
     #[account(
         mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4013,7 +4013,7 @@ pub struct VrfDiceRollSettle<'info> {
     #[account(
         mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4069,7 +4069,7 @@ pub struct VrfLimboSettle<'info> {
     #[account(
         mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 
@@ -4125,7 +4125,7 @@ pub struct VrfCrashSettle<'info> {
     #[account(
         mut,
         seeds = [b"agent", vrf_request.player.as_ref()],
-        bump = agent_stats.bump
+        bump
     )]
     pub agent_stats: Account<'info, AgentStats>,
 

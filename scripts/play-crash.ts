@@ -108,12 +108,16 @@ async function main() {
 
     // Fetch game record
     const gameRecord = await program.account.gameRecord.fetch(gameRecordPda);
-    const crashPoint = (gameRecord.result << 8) / 100; // Decode crash point
     const payout = gameRecord.payout.toNumber();
     const won = payout > 0;
+    // result field stores approximate integer multiplier (crash_point / 100)
+    // For wins, compute exact multiplier from payout
+    const crashPointDisplay = won
+      ? (payout / (betAmount * LAMPORTS_PER_SOL)).toFixed(2)
+      : (gameRecord.result > 0 ? gameRecord.result.toFixed(2) : "< " + cashoutMultiplier.toFixed(2));
 
     console.log("\n--- Result ---");
-    console.log("Crash point:", (crashPoint || gameRecord.result / 100 * 256).toFixed(2) + "x");
+    console.log("Crash point:", crashPointDisplay + "x");
     console.log("Your cashout:", cashoutMultiplier + "x");
     console.log(won ? "YOU WON! Cashed out before crash!" : "CRASHED! Game crashed before your cashout");
     if (won) {

@@ -23,6 +23,7 @@ import rateLimit from 'express-rate-limit';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { AgentCasino } from '../sdk/src';
 import { x402PaymentRequired } from './x402-middleware';
+import { requireMoltLaunchVerification, getMoltLaunchInfo, getVerificationStatus } from './moltlaunch-gate';
 
 // Use require for wallet util (CommonJS compat)
 const { loadWallet } = require('../scripts/utils/wallet');
@@ -200,16 +201,151 @@ app.get('/v1/games/crash',
   }
 );
 
+// ============================================
+// HIGH-ROLLER TABLES (MoltLaunch Verified Only)
+// ============================================
+
+const HIGH_ROLLER_BET = parseFloat(process.env.HIGH_ROLLER_BET || '0.1');
+const HIGH_ROLLER_PRICE = parseFloat(process.env.HIGH_ROLLER_PRICE || '0.10');
+
+const highRollerPaymentOpts = (game: string) => ({
+  recipientWallet: walletAddress,
+  priceUSDC: HIGH_ROLLER_PRICE,
+  connection,
+  description: `High-Roller ${game} at Agent Casino (${HIGH_ROLLER_BET} SOL bet, 1.99x payout)`,
+  network: NETWORK,
+});
+
+// MoltLaunch verification info
+app.get('/v1/highroller/info', freeLimiter, getMoltLaunchInfo);
+
+// Check agent verification status
+app.get('/v1/highroller/status/:agentId', freeLimiter, getVerificationStatus);
+app.get('/v1/highroller/status', freeLimiter, getVerificationStatus);
+
+// High-Roller Coin Flip (MoltLaunch verified agents only)
+app.get('/v1/highroller/coinflip',
+  gameLimiter,
+  requireMoltLaunchVerification(70),
+  x402PaymentRequired(highRollerPaymentOpts('coin flip')),
+  async (req, res) => {
+    const moltlaunch = (req as any).moltlaunch;
+    const choice = (req.query.choice as string) === 'tails' ? 'tails' : 'heads';
+    const betAmount = Math.min(moltlaunch.limits.maxBet, HIGH_ROLLER_BET);
+    
+    try {
+      const result = await casino.coinFlip(betAmount, choice);
+      res.json({
+        game: 'highroller-coinflip',
+        choice,
+        won: result.won,
+        payout: result.payout,
+        betAmount,
+        txSignature: result.txSignature,
+        serverSeed: result.serverSeed,
+        clientSeed: result.clientSeed,
+        verificationHash: result.verificationHash,
+        paymentTx: (req as any).x402Payment?.signature,
+        moltlaunch: {
+          agentId: moltlaunch.agentId,
+          score: moltlaunch.score,
+          tier: moltlaunch.tier
+        }
+      });
+    } catch (err: any) {
+      console.error('High-roller coinflip error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
+    }
+  }
+);
+
+// High-Roller Dice Roll (MoltLaunch verified agents only)
+app.get('/v1/highroller/diceroll',
+  gameLimiter,
+  requireMoltLaunchVerification(70),
+  x402PaymentRequired(highRollerPaymentOpts('dice roll')),
+  async (req, res) => {
+    const moltlaunch = (req as any).moltlaunch;
+    const target = Math.min(5, Math.max(1, parseInt(req.query.target as string) || 3));
+    const betAmount = Math.min(moltlaunch.limits.maxBet, HIGH_ROLLER_BET);
+    
+    try {
+      const result = await casino.diceRoll(betAmount, target as any);
+      res.json({
+        game: 'highroller-diceroll',
+        target,
+        won: result.won,
+        payout: result.payout,
+        betAmount,
+        txSignature: result.txSignature,
+        serverSeed: result.serverSeed,
+        clientSeed: result.clientSeed,
+        paymentTx: (req as any).x402Payment?.signature,
+        moltlaunch: {
+          agentId: moltlaunch.agentId,
+          score: moltlaunch.score,
+          tier: moltlaunch.tier
+        }
+      });
+    } catch (err: any) {
+      console.error('High-roller diceroll error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
+    }
+  }
+);
+
+// High-Roller Limbo (MoltLaunch verified agents only)
+app.get('/v1/highroller/limbo',
+  gameLimiter,
+  requireMoltLaunchVerification(70),
+  x402PaymentRequired(highRollerPaymentOpts('limbo')),
+  async (req, res) => {
+    const moltlaunch = (req as any).moltlaunch;
+    const multiplier = Math.min(100, Math.max(1.01, parseFloat(req.query.multiplier as string) || 2.0));
+    const betAmount = Math.min(moltlaunch.limits.maxBet, HIGH_ROLLER_BET);
+    
+    try {
+      const result = await casino.limbo(betAmount, multiplier);
+      res.json({
+        game: 'highroller-limbo',
+        targetMultiplier: multiplier,
+        won: result.won,
+        payout: result.payout,
+        betAmount,
+        txSignature: result.txSignature,
+        serverSeed: result.serverSeed,
+        clientSeed: result.clientSeed,
+        paymentTx: (req as any).x402Payment?.signature,
+        moltlaunch: {
+          agentId: moltlaunch.agentId,
+          score: moltlaunch.score,
+          tier: moltlaunch.tier
+        }
+      });
+    } catch (err: any) {
+      console.error('High-roller limbo error:', err);
+      res.status(500).json({ error: 'Game execution failed' });
+    }
+  }
+);
+
 // === Start Server ===
 
 app.listen(PORT, () => {
   console.log(`\nAgent Casino x402 API running on http://localhost:${PORT}`);
-  console.log(`\nEndpoints:`);
+  console.log(`\nStandard Tables:`);
   console.log(`  GET /v1/health                    (free, 60/min)`);
   console.log(`  GET /v1/stats                     (free, 60/min)`);
-  console.log(`  GET /v1/games/coinflip?choice=     (x402: ${PRICE_USDC} USDC, 10/min)`);
-  console.log(`  GET /v1/games/diceroll?target=      (x402: ${PRICE_USDC} USDC, 10/min)`);
-  console.log(`  GET /v1/games/limbo?multiplier=     (x402: ${PRICE_USDC} USDC, 10/min)`);
-  console.log(`  GET /v1/games/crash?multiplier=     (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/coinflip?choice=    (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/diceroll?target=    (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/limbo?multiplier=   (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`  GET /v1/games/crash?multiplier=   (x402: ${PRICE_USDC} USDC, 10/min)`);
+  console.log(`\nHigh-Roller Tables (MoltLaunch Verified):`);
+  console.log(`  GET /v1/highroller/info           (free, verification info)`);
+  console.log(`  GET /v1/highroller/status/:agentId (free, check eligibility)`);
+  console.log(`  GET /v1/highroller/coinflip       (x402: ${HIGH_ROLLER_PRICE} USDC, score 70+)`);
+  console.log(`  GET /v1/highroller/diceroll       (x402: ${HIGH_ROLLER_PRICE} USDC, score 70+)`);
+  console.log(`  GET /v1/highroller/limbo          (x402: ${HIGH_ROLLER_PRICE} USDC, score 70+)`);
   console.log(`\nTest: curl http://localhost:${PORT}/v1/health`);
+  console.log(`Verify: curl http://localhost:${PORT}/v1/highroller/info`);
 });

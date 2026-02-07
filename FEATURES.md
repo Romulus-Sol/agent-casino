@@ -411,14 +411,14 @@ npm run start:server  # Starts on port 3402
 +---------------------------------------------------------------+
 |                                                               |
 |  +----------------------------------------------------------+ |
-|  |               Solana Program (Anchor 0.30.1)              | |
+|  |               Solana Program (Anchor 0.32.1)              | |
 |  |                                                          | |
-|  |  House Games:        Prediction Markets:    Memory Slots: | |
-|  |  - coin_flip         - create_market        - create_pool | |
-|  |  - dice_roll         - commit_bet           - deposit     | |
-|  |  - limbo             - reveal_bet           - pull        | |
-|  |  - crash             - resolve              - rate        | |
-|  |                      - claim                - withdraw    | |
+|  |  VRF Games:          Prediction Markets:    Memory Slots: | |
+|  |  - vrf_flip_req/set  - create_market        - create_pool | |
+|  |  - vrf_dice_req/set  - commit_bet           - deposit     | |
+|  |  - vrf_limbo_req/set - reveal_bet           - pull        | |
+|  |  - vrf_crash_req/set - resolve              - rate        | |
+|  |  - expire_vrf_req    - claim                - withdraw    | |
 |  |  PvP Challenges:                                          | |
 |  |  - create_challenge  Hitman Market:         Price Bets:   | |
 |  |  - accept_challenge  - initialize_hit_pool  - create      | |
@@ -525,10 +525,9 @@ class AgentCasino {
   getMyMemories(): Promise<MemoryData[]>
   getActiveMemories(limit): Promise<MemoryData[]>
 
-  // SPL Token Games
+  // SPL Token Vaults
   initializeTokenVault(mint, houseEdgeBps, minBet, maxBetPercent): Promise<string>
   tokenAddLiquidity(mint, amount): Promise<string>
-  tokenCoinFlip(mint, amount, choice): Promise<TokenGameResult>
   getTokenVaultStats(mint): Promise<TokenVaultStats>
 
   // Jupiter Auto-Swap (any token → SOL → game)
@@ -603,6 +602,8 @@ class HitmanMarket {
 - [x] Security audit #2: 16 vulnerabilities fixed (Jupiter + x402)
 - [x] Security audit #3: 8 unsafe patterns fixed + Switchboard VRF for all games
 - [x] Security audit #4: 5 breaking-change fixes (init_if_needed, close constraints, SHA-256, integer math, safe unwrap)
-- [x] Switchboard VRF (Verifiable Random Function) for all 4 games
-- [x] 100% SDK instruction coverage (42+ instructions)
-- [x] Comprehensive test suite (69 tests, 0 remaining vulnerabilities)
+- [x] Security audit #5: 30 fixes (deep arithmetic, liquidity checks, LP withdrawal, VRF expiry refunds)
+- [x] Security audit #6: 8 fixes (VRF-only, on-chain tests, race condition fix, arbiter payouts)
+- [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
+- [x] 100% SDK instruction coverage (44+ instructions)
+- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 93 vulnerabilities fixed, 0 remaining)

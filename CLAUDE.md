@@ -44,16 +44,21 @@ agent-casino/
 
 ## Technical Details
 
-### Solana Program (Anchor 0.30.1)
+### Solana Program (Anchor 0.32.1)
 
 **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 
-**Instructions:**
+**Key Instructions (44+ total):**
 - `initialize_house(house_edge_bps, min_bet, max_bet_percent)` - Set up the casino
-- `add_liquidity(amount)` - Provide liquidity to the pool
-- `coin_flip(amount, choice, client_seed)` - 50/50 game, ~2x payout
-- `dice_roll(amount, target, client_seed)` - Choose 1-5, win if roll <= target
-- `limbo(amount, target_multiplier, client_seed)` - Crash-style game, 1.01x-100x
+- `add_liquidity(amount)` / `remove_liquidity(amount)` - LP management
+- `vrf_coin_flip_request/settle` - VRF coin flip (2-step)
+- `vrf_dice_roll_request/settle` - VRF dice roll (2-step)
+- `vrf_limbo_request/settle` - VRF limbo (2-step)
+- `vrf_crash_request/settle` - VRF crash (2-step)
+- `expire_vrf_request` - Refund if VRF not settled within 300 slots
+- `create_challenge/accept_challenge` - PvP
+- `deposit_memory/pull_memory/rate_memory` - Memory Slots
+- `create_hit/claim_hit/submit_proof/verify_hit/arbitrate_hit` - Hitman Market
 
 **Accounts (PDAs):**
 | Account | Seeds | Purpose |
@@ -63,8 +68,11 @@ agent-casino/
 | GameRecord | `["game", house, game_index]` | Individual game result + verification |
 | AgentStats | `["agent", player]` | Per-agent leaderboard data |
 | LpPosition | `["lp", house, provider]` | Liquidity provider tracking |
+| VrfRequest | `["vrf_request", house, game_index]` | VRF game request |
+| MemoryPool | `["memory_pool"]` | Memory Slots pool |
+| HitPool | `["hit_pool"]` | Hitman bounty pool |
 
-**Randomness:** Commit-reveal with `Hash(server_seed || client_seed || player_pubkey)`
+**Randomness:** Switchboard VRF only. All non-VRF (clock-based) instructions removed in Audit 6.
 
 ### TypeScript SDK
 
@@ -99,6 +107,7 @@ casino.verifyResult(serverSeed, clientSeed, player, result);
 | Coin Flip | Pick heads/tails | ~1.98x (2x minus 1% edge) |
 | Dice Roll | Pick target 1-5, win if roll <= target | 1.2x - 6x depending on target |
 | Limbo | Pick multiplier, win if result >= target | 1.01x - 100x |
+| Crash | Pick cashout multiplier, win if crash >= target | 1.01x - 100x |
 | Memory Slots | Pay to pull random knowledge | Depositors earn on pulls |
 
 ---
@@ -164,7 +173,7 @@ npx ts-node scripts/memory-withdraw.ts <memory_address>
 
 ## Build & Deploy
 
-**Prerequisites:** Rust 1.70+, Solana CLI 1.17+, Anchor 0.30.1, Node.js 18+
+**Prerequisites:** Rust 1.70+, Solana CLI 1.17+, Anchor 0.32.1, Node.js 18+
 
 ```bash
 # Install dependencies

@@ -27,7 +27,7 @@ That's it. You just played an on-chain coin flip on Solana devnet.
 
 ### 1. TypeScript SDK
 
-Import the SDK, call a method. Every game resolves in a single atomic transaction.
+Import the SDK, call a method. Every game uses Switchboard VRF under the hood (2-step request→settle, handled automatically).
 
 ```typescript
 const casino = new AgentCasino(connection, wallet);
@@ -478,7 +478,7 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 | **House Edge** | 1% |
 | **Games Played** | 85+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 93 (across 5 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 93 (across 6 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

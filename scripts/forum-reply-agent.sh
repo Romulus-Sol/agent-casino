@@ -24,8 +24,11 @@ REPLY_COUNT=0
 # Spam bots to ignore
 SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent"
 
-# Our post IDs (all 37+ posts)
-POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1896 2153 2164)
+# Our post IDs (all posts)
+POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191)
+
+# Integration keywords — comments matching these get priority + detailed technical replies
+INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"
 
 # ── Setup ─────────────────────────────────────────────────────────
 mkdir -p "$PROJECT_DIR/data" "$PROJECT_DIR/logs"
@@ -76,11 +79,18 @@ mark_engaged() {
 }
 
 # Generate a reply using Claude CLI
+# Check if a comment is about integration/collaboration
+is_integration_comment() {
+    local body="$1"
+    echo "$body" | grep -qiE "$INTEGRATION_KEYWORDS"
+}
+
+# Generate a standard reply
 generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model haiku --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games, Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 4 audits, 55 bugs fixed, 69 tests. 100% AI-built.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games, Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 5 audits, 85 bugs fixed, 69 tests. 100% AI-built.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
@@ -90,7 +100,44 @@ REPLY RULES:
 - 2-4 sentences max. Conversational, not formal
 - If they asked a question, answer it specifically
 - If relevant, briefly mention Agent Casino but don't be pushy
+- IMPORTANT: If they mention anything about integration, collaboration, using our SDK, building with us, or composability — treat this as HIGH PRIORITY. Be enthusiastic, give them technical details, and invite them to use our code.
 - 1-2 emojis max
+- Date: $(date +%Y-%m-%d)" \
+        "$context" 2>/dev/null)
+    echo "$reply"
+}
+
+# Generate a detailed integration reply with full technical context
+generate_integration_reply() {
+    local context="$1"
+    local reply
+    reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana.
+
+THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
+
+OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary. Just the reply exactly as it should be posted.
+
+TECHNICAL DETAILS TO INCLUDE (pick what's relevant to their request):
+- Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
+- SDK: npm install @agent-casino/sdk
+- Repo: github.com/Romulus-Sol/agent-casino (open source, PRs welcome)
+- Key PDAs: House [\"house\"], AgentStats [\"agent\", player_pubkey], GameRecord [\"game\", house, game_index], HitPool [\"hit_pool\"], TokenVault [\"token_vault\", house, mint]
+- SDK methods: coinFlip(), diceRoll(), limbo(), crash(), addLiquidity(), getPlayerStats(), getGameHistory(), getHouseStats()
+- Hitman Market: createHit(), claimHit(), submitProof(), verifyHit() — on-chain bounty escrow
+- SPL Token support: any SPL token can be used via initializeTokenVault()
+- Jupiter integration: swapAndCoinFlip() — swap any token to SOL and play in one tx
+- x402 HTTP server: Express on port 3402, USDC payment gating (server/ directory)
+- Memory Slots: depositMemory(), pullMemory() — knowledge marketplace
+- LP system: addLiquidity() — earn proportional house edge from every game
+
+REPLY RULES:
+- ALWAYS start with @AgentName
+- Be warm, enthusiastic, and DETAILED. This is a potential partner.
+- 4-8 sentences. Include specific technical details they need.
+- Suggest a concrete integration path based on what they described.
+- Always end with an invitation: share repo link, say PRs are welcome, offer to help debug.
+- Tell them exactly which SDK methods or PDAs are relevant to their use case.
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"
@@ -98,6 +145,98 @@ REPLY RULES:
 
 # ── Main Logic ────────────────────────────────────────────────────
 log "═══ FORUM REPLY AGENT START ═══"
+
+# ── Phase 0: PRIORITY — Scan recent/new posts for integration opportunities ─
+log "Phase 0: Scanning recent posts for integration opportunities..."
+INTEGRATION_REPLIES=0
+
+RECENT_POSTS=$(api_get "/forum/posts?sort=new&limit=20")
+if ! echo "$RECENT_POSTS" | jq -e '.error' > /dev/null 2>&1; then
+    RECENT_COUNT=$(echo "$RECENT_POSTS" | jq '.posts | length')
+
+    for i in $(seq 0 $(( RECENT_COUNT - 1 ))); do
+        [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
+
+        POST=$(echo "$RECENT_POSTS" | jq -c ".posts[$i]")
+        POST_ID=$(echo "$POST" | jq -r '.id')
+        POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
+        POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
+        POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
+        POST_BODY=$(echo "$POST" | jq -r '.body // ""')
+
+        # Skip our own posts and spam bots
+        [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
+        echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
+
+        # Skip if already engaged
+        already_engaged "$POST_ID" && continue
+
+        # Check if post mentions integration, collaboration, casino, betting, SDK, or our project
+        INTEGRATION_MATCH=false
+        if echo "$POST_BODY $POST_TITLE" | grep -qiE "$INTEGRATION_KEYWORDS|casino|betting.*agent|agent.*bet|bounty.*system|escrow|prediction.*market|gambl|wager|randomness|VRF|provably.fair"; then
+            INTEGRATION_MATCH=true
+        fi
+
+        [ "$INTEGRATION_MATCH" = false ] && continue
+
+        # Check if we already have a comment on this post
+        POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
+        OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
+        if [ "$OUR_EXISTING" -gt 0 ]; then
+            mark_engaged "$POST_ID"
+            continue
+        fi
+
+        log "*** Phase 0 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
+
+        CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
+
+Post author: $POST_AGENT_NAME
+Post title: $POST_TITLE
+Post body (first 800 chars): ${POST_BODY:0:800}
+
+This agent is building something relevant to us. Write a compelling comment that shows how Agent Casino could integrate with or complement their project. Be specific about which of our features are relevant. Invite them to use our SDK and code. Start with @$POST_AGENT_NAME."
+
+        REPLY=$(generate_integration_reply "$CONTEXT")
+
+        if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
+            log "  WARNING: Empty reply, skipping"
+            continue
+        fi
+
+        # Strip meta-commentary
+        REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
+        REPLY=$(echo "$REPLY" | sed '/^$/d')
+
+        # Ensure @mention
+        if ! echo "$REPLY" | grep -qi "^@"; then
+            REPLY="@$POST_AGENT_NAME — $REPLY"
+        fi
+
+        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+            log "  WARNING: Reply looks bad, skipping"
+            continue
+        fi
+
+        log "  Reply: ${REPLY:0:150}..."
+
+        ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
+        RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+
+        if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
+            log "  ERROR: Failed to post: $(echo "$RESULT" | jq -r '.error')"
+        else
+            COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
+            log "  SUCCESS: Integration outreach posted (ID: $COMMENT_ID)"
+            mark_engaged "$POST_ID"
+            REPLY_COUNT=$((REPLY_COUNT + 1))
+            INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
+            sleep 3
+        fi
+    done
+fi
+
+log "Phase 0 complete: $INTEGRATION_REPLIES integration outreach replies"
 
 # ── Phase 1: Reply to unreplied comments on our posts ─────────
 log "Phase 1: Checking our ${#POST_IDS[@]} posts for unreplied comments..."
@@ -148,10 +287,20 @@ for POST_ID in "${POST_IDS[@]}"; do
         POST_JSON=$(api_get "/forum/posts/$POST_ID")
         POST_TITLE=$(echo "$POST_JSON" | jq -r '.post.title // "Unknown post"')
 
-        log "Replying to $AGENT_NAME on post #$POST_ID ($POST_TITLE)"
+        # Check if this is an integration request (HIGH PRIORITY)
+        IS_INTEGRATION=false
+        if is_integration_comment "$COMMENT_BODY"; then
+            IS_INTEGRATION=true
+        fi
+
+        if [ "$IS_INTEGRATION" = true ]; then
+            log "*** INTEGRATION REQUEST from $AGENT_NAME on post #$POST_ID ($POST_TITLE) ***"
+        else
+            log "Replying to $AGENT_NAME on post #$POST_ID ($POST_TITLE)"
+        fi
         log "  Comment: ${COMMENT_BODY:0:100}..."
 
-        # Generate reply
+        # Generate reply — use detailed integration prompt for integration requests
         CONTEXT="Reply to this comment on our forum post titled \"$POST_TITLE\":
 
 Agent name: $AGENT_NAME
@@ -159,7 +308,11 @@ Their comment: $COMMENT_BODY
 
 Our post is about Agent Casino. Generate a friendly, substantive reply. Start with @$AGENT_NAME"
 
-        REPLY=$(generate_reply "$CONTEXT")
+        if [ "$IS_INTEGRATION" = true ]; then
+            REPLY=$(generate_integration_reply "$CONTEXT")
+        else
+            REPLY=$(generate_reply "$CONTEXT")
+        fi
 
         if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
             log "  WARNING: Empty or too short reply generated, skipping"
@@ -243,7 +396,17 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
                 continue
             fi
 
-            log "Engaging with hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
+            # Check if this post mentions integration or could be a collaboration opportunity
+            IS_INTEGRATION=false
+            if is_integration_comment "$POST_BODY" || is_integration_comment "$POST_TITLE"; then
+                IS_INTEGRATION=true
+            fi
+
+            if [ "$IS_INTEGRATION" = true ]; then
+                log "*** INTEGRATION OPPORTUNITY in hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
+            else
+                log "Engaging with hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
+            fi
 
             # Generate engagement comment
             CONTEXT="Write a comment on this hackathon forum post by another agent:
@@ -252,9 +415,13 @@ Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 500 chars): ${POST_BODY:0:500}
 
-Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive — ask a specific question, share a relevant insight, or offer to collaborate. If their project could integrate with Agent Casino (on-chain games, SDK, VRF), mention it briefly."
+Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive — ask a specific question, share a relevant insight, or offer to collaborate. If their project could integrate with Agent Casino (on-chain games, SDK, VRF, bounties, prediction markets), mention how and give them technical details."
 
-            REPLY=$(generate_reply "$CONTEXT")
+            if [ "$IS_INTEGRATION" = true ]; then
+                REPLY=$(generate_integration_reply "$CONTEXT")
+            else
+                REPLY=$(generate_reply "$CONTEXT")
+            fi
 
             if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
                 log "  WARNING: Empty or too short reply generated, skipping"

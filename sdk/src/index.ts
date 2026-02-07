@@ -35,6 +35,7 @@ import { randomBytes, createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { jupiterSwapToSol, JupiterSwapResult } from './jupiter';
+import bs58 from 'bs58';
 
 // Program ID - update after deployment
 export const PROGRAM_ID = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV');
@@ -448,194 +449,167 @@ export class AgentCasino {
     return await this.provider.sendAndConfirm(tx);
   }
 
-  // === Game Methods ===
+  // === Game Methods (VRF-backed) ===
 
   /**
-   * Flip a coin - 50/50 odds
+   * Retry wrapper for VRF requests — handles PDA collision from game index race
+   */
+  private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        const msg = err?.message || err?.toString() || '';
+        if (attempt < maxRetries - 1 && (msg.includes('already in use') || msg.includes('0x0') || msg.includes('custom program error'))) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('Max retries exceeded');
+  }
+
+  /**
+   * Wait for a VRF request to be settled (poll until status changes from Pending)
+   */
+  private async waitForVrfSettle(vrfRequestPda: PublicKey, timeoutMs = 30000): Promise<any> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const vrfRequest = await this.program.account.vrfRequest.fetch(vrfRequestPda);
+        // status 1 = Settled, status 2 = Expired
+        if (vrfRequest.status && (vrfRequest as any).status.settled !== undefined) {
+          return vrfRequest;
+        }
+        if (vrfRequest.status && (vrfRequest as any).status.expired !== undefined) {
+          throw new Error('VRF request expired');
+        }
+      } catch (err: any) {
+        if (err.message?.includes('expired')) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    throw new Error('VRF settle timeout');
+  }
+
+  /**
+   * Flip a coin - 50/50 odds (VRF-backed)
    * @param amountSol Amount to bet in SOL
    * @param choice 'heads' or 'tails'
-   * @returns Game result with verification data
+   * @param randomnessAccount Switchboard randomness account address
+   * @returns Game result
    */
-  async coinFlip(amountSol: number, choice: CoinChoice): Promise<GameResult> {
+  async coinFlip(amountSol: number, choice: CoinChoice, randomnessAccount?: string): Promise<GameResult> {
     await this.ensureAgentStats();
-    const clientSeed = this.generateClientSeed();
-    const choiceNum = choice === 'heads' ? 0 : 1;
-    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
-
-    const house = await this.getHouseAccount();
-    const gameIndex = house.totalGames;
-
-    const [gameRecordPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('game'),
-        this.housePda.toBuffer(),
-        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
-      ],
-      PROGRAM_ID
-    );
-
-    const [agentStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
-      PROGRAM_ID
-    );
-
-    // Build and send transaction
-    const tx = await this.buildGameTransaction(
-      'coinFlip',
-      amountLamports,
-      choiceNum,
-      clientSeed,
-      gameRecordPda,
-      agentStatsPda
-    );
-
-    const signature = await this.provider.sendAndConfirm(tx);
-    
-    // Fetch result
-    const gameRecord = await this.fetchGameRecord(gameRecordPda);
-    
-    return this.formatGameResult(signature, gameRecord, clientSeed);
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
+    const result = await this.withRetry(async () => {
+      const { vrfRequestAddress } = await this.vrfCoinFlipRequest(amountSol, choice, randomnessAccount);
+      return { vrfRequestAddress };
+    });
+    // Settle
+    const settleResult = await this.vrfCoinFlipSettle(result.vrfRequestAddress, randomnessAccount);
+    return {
+      signature: settleResult.tx,
+      won: settleResult.won,
+      payout: settleResult.payout,
+      gameType: 'CoinFlip',
+      amount: amountSol,
+      result: settleResult.won ? (choice === 'heads' ? 0 : 1) : (choice === 'heads' ? 1 : 0),
+      choice: choice === 'heads' ? 0 : 1,
+    };
   }
 
   /**
-   * Roll dice - choose a target, win if roll <= target
-   * Lower target = higher payout, lower chance
+   * Roll dice - choose a target, win if roll <= target (VRF-backed)
    * @param amountSol Amount to bet in SOL
    * @param target Target number (1-5)
-   * @returns Game result with verification data
+   * @param randomnessAccount Switchboard randomness account address
+   * @returns Game result
    */
-  async diceRoll(amountSol: number, target: DiceTarget): Promise<GameResult> {
+  async diceRoll(amountSol: number, target: DiceTarget, randomnessAccount?: string): Promise<GameResult> {
     await this.ensureAgentStats();
-    const clientSeed = this.generateClientSeed();
-    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
-
-    const house = await this.getHouseAccount();
-    const gameIndex = house.totalGames;
-
-    const [gameRecordPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('game'),
-        this.housePda.toBuffer(),
-        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
-      ],
-      PROGRAM_ID
-    );
-
-    const [agentStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
-      PROGRAM_ID
-    );
-
-    const tx = await this.buildGameTransaction(
-      'diceRoll',
-      amountLamports,
-      target,
-      clientSeed,
-      gameRecordPda,
-      agentStatsPda
-    );
-
-    const signature = await this.provider.sendAndConfirm(tx);
-    const gameRecord = await this.fetchGameRecord(gameRecordPda);
-    
-    return this.formatGameResult(signature, gameRecord, clientSeed);
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
+    const result = await this.withRetry(async () => {
+      const { vrfRequestAddress } = await this.vrfDiceRollRequest(amountSol, target, randomnessAccount);
+      return { vrfRequestAddress };
+    });
+    const settleResult = await this.vrfDiceRollSettle(result.vrfRequestAddress, randomnessAccount);
+    return {
+      signature: settleResult.tx,
+      won: settleResult.won,
+      payout: settleResult.payout,
+      gameType: 'DiceRoll',
+      amount: amountSol,
+      result: settleResult.result,
+      choice: target,
+    };
   }
 
   /**
-   * Limbo - set a target multiplier, win if result >= target
+   * Limbo - set a target multiplier, win if result >= target (VRF-backed)
    * @param amountSol Amount to bet in SOL
    * @param targetMultiplier Target multiplier (1.01x - 100x)
-   * @returns Game result with verification data
+   * @param randomnessAccount Switchboard randomness account address
+   * @returns Game result
    */
-  async limbo(amountSol: number, targetMultiplier: number): Promise<GameResult> {
+  async limbo(amountSol: number, targetMultiplier: number, randomnessAccount?: string): Promise<GameResult> {
     await this.ensureAgentStats();
     if (targetMultiplier < 1.01 || targetMultiplier > 100) {
       throw new Error('Target multiplier must be between 1.01 and 100');
     }
-
-    const clientSeed = this.generateClientSeed();
-    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
-    const targetBps = Math.floor(targetMultiplier * 100);
-
-    const house = await this.getHouseAccount();
-    const gameIndex = house.totalGames;
-
-    const [gameRecordPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('game'),
-        this.housePda.toBuffer(),
-        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
-      ],
-      PROGRAM_ID
-    );
-
-    const [agentStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
-      PROGRAM_ID
-    );
-
-    const tx = await this.buildGameTransaction(
-      'limbo',
-      amountLamports,
-      targetBps,
-      clientSeed,
-      gameRecordPda,
-      agentStatsPda
-    );
-
-    const signature = await this.provider.sendAndConfirm(tx);
-    const gameRecord = await this.fetchGameRecord(gameRecordPda);
-
-    return this.formatGameResult(signature, gameRecord, clientSeed);
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
+    const result = await this.withRetry(async () => {
+      const { vrfRequestAddress } = await this.vrfLimboRequest(amountSol, targetMultiplier, randomnessAccount);
+      return { vrfRequestAddress };
+    });
+    const settleResult = await this.vrfLimboSettle(result.vrfRequestAddress, randomnessAccount);
+    return {
+      signature: settleResult.tx,
+      won: settleResult.won,
+      payout: settleResult.payout,
+      gameType: 'Limbo',
+      amount: amountSol,
+      result: 0,
+      choice: Math.floor(targetMultiplier * 100),
+    };
   }
 
   /**
-   * Play crash - set your cashout multiplier and hope the game doesn't crash before you cash out
-   * Most games crash early (1x-3x) but occasionally can go very high (50x+)
+   * Play crash - set your cashout multiplier (VRF-backed)
    * @param amountSol Amount to bet in SOL
    * @param cashoutMultiplier Target cashout multiplier (1.01 to 100)
-   * @returns Game result with crash point
+   * @param randomnessAccount Switchboard randomness account address
+   * @returns Game result
    */
-  async crash(amountSol: number, cashoutMultiplier: number): Promise<GameResult> {
+  async crash(amountSol: number, cashoutMultiplier: number, randomnessAccount?: string): Promise<GameResult> {
     await this.ensureAgentStats();
     if (cashoutMultiplier < 1.01 || cashoutMultiplier > 100) {
       throw new Error('Cashout multiplier must be between 1.01 and 100');
     }
-
-    const clientSeed = this.generateClientSeed();
-    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
-    const cashoutBps = Math.floor(cashoutMultiplier * 100);
-
-    const house = await this.getHouseAccount();
-    const gameIndex = house.totalGames;
-
-    const [gameRecordPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('game'),
-        this.housePda.toBuffer(),
-        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
-      ],
-      PROGRAM_ID
-    );
-
-    const [agentStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
-      PROGRAM_ID
-    );
-
-    const tx = await this.buildGameTransaction(
-      'crash',
-      amountLamports,
-      cashoutBps,
-      clientSeed,
-      gameRecordPda,
-      agentStatsPda
-    );
-
-    const signature = await this.provider.sendAndConfirm(tx);
-    const gameRecord = await this.fetchGameRecord(gameRecordPda);
-
-    return this.formatGameResult(signature, gameRecord, clientSeed);
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
+    const result = await this.withRetry(async () => {
+      const { vrfRequestAddress } = await this.vrfCrashRequest(amountSol, cashoutMultiplier, randomnessAccount);
+      return { vrfRequestAddress };
+    });
+    const settleResult = await this.vrfCrashSettle(result.vrfRequestAddress, randomnessAccount);
+    return {
+      signature: settleResult.tx,
+      won: settleResult.won,
+      payout: settleResult.payout,
+      gameType: 'Crash',
+      amount: amountSol,
+      result: 0,
+      choice: Math.floor(cashoutMultiplier * 100),
+    };
   }
 
   // === Stats & Analytics ===
@@ -945,60 +919,60 @@ export class AgentCasino {
    * Coin flip with automatic risk adjustment
    * Bet size scales based on macro conditions when riskProvider is configured
    */
-  async smartCoinFlip(baseBetSol: number, choice: CoinChoice): Promise<GameResult & { riskContext?: BettingContext }> {
+  async smartCoinFlip(baseBetSol: number, choice: CoinChoice, randomnessAccount?: string): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
       const context = await this.getBettingContext();
       const mult = context.gameMultipliers?.coinFlip ?? context.betMultiplier;
       const adjustedBet = baseBetSol * mult;
-      const result = await this.coinFlip(adjustedBet, choice);
+      const result = await this.coinFlip(adjustedBet, choice, randomnessAccount);
       return { ...result, riskContext: context };
     }
-    return this.coinFlip(baseBetSol, choice);
+    return this.coinFlip(baseBetSol, choice, randomnessAccount);
   }
 
   /**
    * Dice roll with automatic risk adjustment
    * Scales more aggressively in high-volatility environments
    */
-  async smartDiceRoll(baseBetSol: number, target: DiceTarget): Promise<GameResult & { riskContext?: BettingContext }> {
+  async smartDiceRoll(baseBetSol: number, target: DiceTarget, randomnessAccount?: string): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
       const context = await this.getBettingContext();
       const mult = context.gameMultipliers?.diceRoll ?? context.betMultiplier;
       const adjustedBet = baseBetSol * mult;
-      const result = await this.diceRoll(adjustedBet, target);
+      const result = await this.diceRoll(adjustedBet, target, randomnessAccount);
       return { ...result, riskContext: context };
     }
-    return this.diceRoll(baseBetSol, target);
+    return this.diceRoll(baseBetSol, target, randomnessAccount);
   }
 
   /**
    * Limbo with automatic risk adjustment
    * Factors in volatility + liquidity stress for high-multiplier targets
    */
-  async smartLimbo(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
+  async smartLimbo(baseBetSol: number, targetMultiplier: number, randomnessAccount?: string): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
       const context = await this.getBettingContext();
       const mult = context.gameMultipliers?.limbo ?? context.betMultiplier;
       const adjustedBet = baseBetSol * mult;
-      const result = await this.limbo(adjustedBet, targetMultiplier);
+      const result = await this.limbo(adjustedBet, targetMultiplier, randomnessAccount);
       return { ...result, riskContext: context };
     }
-    return this.limbo(baseBetSol, targetMultiplier);
+    return this.limbo(baseBetSol, targetMultiplier, randomnessAccount);
   }
 
   /**
    * Crash with automatic risk adjustment
    * Most aggressive scaling — factors in volatility + flash crash probability + liquidity
    */
-  async smartCrash(baseBetSol: number, targetMultiplier: number): Promise<GameResult & { riskContext?: BettingContext }> {
+  async smartCrash(baseBetSol: number, targetMultiplier: number, randomnessAccount?: string): Promise<GameResult & { riskContext?: BettingContext }> {
     if (this.config.riskProvider === 'wargames') {
       const context = await this.getBettingContext();
       const mult = context.gameMultipliers?.crash ?? context.betMultiplier;
       const adjustedBet = baseBetSol * mult;
-      const result = await this.crash(adjustedBet, targetMultiplier);
+      const result = await this.crash(adjustedBet, targetMultiplier, randomnessAccount);
       return { ...result, riskContext: context };
     }
-    return this.crash(baseBetSol, targetMultiplier);
+    return this.crash(baseBetSol, targetMultiplier, randomnessAccount);
   }
 
   // === Jupiter Auto-Swap Methods ===
@@ -1010,13 +984,13 @@ export class AgentCasino {
    * @param tokenAmount - Amount in token base units (e.g., 1000000 = 1 USDC)
    * @param choice - 'heads' or 'tails'
    */
-  async swapAndCoinFlip(inputMint: string, tokenAmount: number, choice: CoinChoice): Promise<SwapAndPlayResult> {
+  async swapAndCoinFlip(inputMint: string, tokenAmount: number, choice: CoinChoice, randomnessAccount?: string): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
     if (swap.mock) {
       console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
     }
     try {
-      const result = await this.coinFlip(swap.solAmount, choice);
+      const result = await this.coinFlip(swap.solAmount, choice, randomnessAccount);
       return { ...result, swap };
     } catch (err: any) {
       throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
@@ -1026,13 +1000,13 @@ export class AgentCasino {
   /**
    * Swap any SPL token to SOL via Jupiter, then play dice roll.
    */
-  async swapAndDiceRoll(inputMint: string, tokenAmount: number, target: DiceTarget): Promise<SwapAndPlayResult> {
+  async swapAndDiceRoll(inputMint: string, tokenAmount: number, target: DiceTarget, randomnessAccount?: string): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
     if (swap.mock) {
       console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
     }
     try {
-      const result = await this.diceRoll(swap.solAmount, target);
+      const result = await this.diceRoll(swap.solAmount, target, randomnessAccount);
       return { ...result, swap };
     } catch (err: any) {
       throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
@@ -1042,13 +1016,13 @@ export class AgentCasino {
   /**
    * Swap any SPL token to SOL via Jupiter, then play limbo.
    */
-  async swapAndLimbo(inputMint: string, tokenAmount: number, targetMultiplier: number): Promise<SwapAndPlayResult> {
+  async swapAndLimbo(inputMint: string, tokenAmount: number, targetMultiplier: number, randomnessAccount?: string): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
     if (swap.mock) {
       console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
     }
     try {
-      const result = await this.limbo(swap.solAmount, targetMultiplier);
+      const result = await this.limbo(swap.solAmount, targetMultiplier, randomnessAccount);
       return { ...result, swap };
     } catch (err: any) {
       throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
@@ -1058,13 +1032,13 @@ export class AgentCasino {
   /**
    * Swap any SPL token to SOL via Jupiter, then play crash.
    */
-  async swapAndCrash(inputMint: string, tokenAmount: number, cashoutMultiplier: number): Promise<SwapAndPlayResult> {
+  async swapAndCrash(inputMint: string, tokenAmount: number, cashoutMultiplier: number, randomnessAccount?: string): Promise<SwapAndPlayResult> {
     const swap = await this.jupiterSwap(inputMint, tokenAmount);
     if (swap.mock) {
       console.warn(`[AgentCasino] Mock swap: no actual token swap performed. Using ${swap.solAmount} SOL from wallet.`);
     }
     try {
-      const result = await this.crash(swap.solAmount, cashoutMultiplier);
+      const result = await this.crash(swap.solAmount, cashoutMultiplier, randomnessAccount);
       return { ...result, swap };
     } catch (err: any) {
       throw new Error(`Swap succeeded (${swap.signature}) but game failed: ${err.message}. SOL from swap is in your wallet.`);
@@ -1245,119 +1219,6 @@ export class AgentCasino {
     return await this.provider.sendAndConfirm(tx);
   }
 
-  /**
-   * Play a coin flip with SPL tokens
-   * @param mint SPL token mint address
-   * @param amount Bet amount in token base units
-   * @param choice 'heads' or 'tails'
-   * @param playerAta Player's associated token account (will be derived if not provided)
-   */
-  async tokenCoinFlip(
-    mint: string | PublicKey,
-    amount: number,
-    choice: CoinChoice,
-    playerAta?: string | PublicKey
-  ): Promise<TokenGameResult> {
-    await this.ensureAgentStats();
-    const mintPubkey = typeof mint === 'string' ? new PublicKey(mint) : mint;
-    const { tokenVaultPda, vaultAtaPda } = this.deriveTokenVaultPdas(mintPubkey);
-    const choiceNum = choice === 'heads' ? 0 : 1;
-    const clientSeed = this.generateClientSeed();
-
-    // Fetch vault to get game index
-    const vaultAccount = await this.connection.getAccountInfo(tokenVaultPda);
-    if (!vaultAccount) throw new Error('Token vault not found for this mint');
-    const totalGames = new BN(vaultAccount.data.slice(8 + 32 + 32 + 32 + 8 + 2 + 8 + 1, 8 + 32 + 32 + 32 + 8 + 2 + 8 + 1 + 8), 'le');
-
-    const gameIndexBuffer = totalGames.toArrayLike(Buffer, 'le', 8);
-    const [gameRecordPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_game'), tokenVaultPda.toBuffer(), gameIndexBuffer],
-      PROGRAM_ID
-    );
-
-    const [agentStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), this.wallet.publicKey.toBuffer()],
-      PROGRAM_ID
-    );
-
-    // Derive player ATA if not provided
-    let playerAtaPubkey: PublicKey;
-    if (playerAta) {
-      playerAtaPubkey = typeof playerAta === 'string' ? new PublicKey(playerAta) : playerAta;
-    } else {
-      const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
-      playerAtaPubkey = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
-    }
-
-    const discriminator = Buffer.from([0x05, 0x5b, 0x10, 0x19, 0x47, 0x52, 0x71, 0xef]);
-    const instructionData = Buffer.concat([
-      discriminator,
-      new BN(amount).toArrayLike(Buffer, 'le', 8),
-      Buffer.from([choiceNum]),
-      clientSeed,
-    ]);
-
-    const ix = {
-      programId: PROGRAM_ID,
-      keys: [
-        { pubkey: tokenVaultPda, isSigner: false, isWritable: true },
-        { pubkey: mintPubkey, isSigner: false, isWritable: false },
-        { pubkey: vaultAtaPda, isSigner: false, isWritable: true },
-        { pubkey: gameRecordPda, isSigner: false, isWritable: true },
-        { pubkey: agentStatsPda, isSigner: false, isWritable: true },
-        { pubkey: playerAtaPubkey, isSigner: false, isWritable: true },
-        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
-        { pubkey: AgentCasino.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
-      data: instructionData,
-    };
-
-    const tx = new Transaction().add(ix);
-    const txSignature = await this.provider.sendAndConfirm(tx);
-
-    // Parse game record
-    const gameAccount = await this.connection.getAccountInfo(gameRecordPda);
-    if (gameAccount) {
-      const data = gameAccount.data;
-      let offset = 8; // skip discriminator
-      offset += 32; // player
-      offset += 32; // mint
-      const gameType = data[offset]; offset += 1;
-      const betAmount = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
-      const resultChoice = data[offset]; offset += 1;
-      const result = data[offset]; offset += 1;
-      const payout = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
-      const serverSeed = data.slice(offset, offset + 32); offset += 32;
-      const parsedClientSeed = data.slice(offset, offset + 32); offset += 32;
-      const timestamp = new BN(data.slice(offset, offset + 8), 'le'); offset += 8;
-      const slot = new BN(data.slice(offset, offset + 8), 'le');
-
-      return {
-        txSignature,
-        won: payout.toNumber() > 0,
-        payout: payout.toNumber(),
-        result,
-        choice: choiceNum,
-        mint: mintPubkey.toString(),
-        serverSeed: Buffer.from(serverSeed).toString('hex'),
-        clientSeed: Buffer.from(parsedClientSeed).toString('hex'),
-        slot: slot.toNumber(),
-      };
-    }
-
-    return {
-      txSignature,
-      won: false,
-      payout: 0,
-      result: -1,
-      choice: choiceNum,
-      mint: mintPubkey.toString(),
-      serverSeed: '',
-      clientSeed: clientSeed.toString('hex'),
-      slot: 0,
-    };
-  }
 
   /**
    * Get token vault stats for a specific mint
@@ -1701,9 +1562,35 @@ export class AgentCasino {
    * Get all memories you've pulled
    */
   async getMyPulls(): Promise<MemoryPullRecord[]> {
-    // This would require scanning or maintaining an index
-    // For now, return empty array - full implementation would need getProgramAccounts
-    return [];
+    // Anchor discriminator for MemoryPull: sha256("account:MemoryPull")[0..8]
+    const discriminator = createHash('sha256')
+      .update(Buffer.from('account:MemoryPull'))
+      .digest()
+      .subarray(0, 8);
+
+    const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
+      filters: [
+        { memcmp: { offset: 0, bytes: bs58.encode(discriminator) } },
+        { memcmp: { offset: 8, bytes: this.wallet.publicKey.toBase58() } },
+      ],
+    });
+
+    return accounts.map(({ account }) => {
+      const data = account.data;
+      // Layout: 8 disc + 32 puller + 32 memory + 1 option_tag [+ 1 rating] + 8 timestamp + 1 bump
+      const puller = new PublicKey(data.subarray(8, 40));
+      const memory = new PublicKey(data.subarray(40, 72));
+      const ratingTag = data[72];
+      const rating = ratingTag === 1 ? data[73] : null;
+      const tsOffset = ratingTag === 1 ? 74 : 73;
+      const timestamp = Number(data.readBigInt64LE(tsOffset));
+      return {
+        puller: puller.toString(),
+        memory: memory.toString(),
+        rating,
+        timestamp,
+      };
+    });
   }
 
   /**
@@ -2034,51 +1921,6 @@ export class AgentCasino {
       case 3: return 'Crash';
       default: return 'CoinFlip';
     }
-  }
-
-  private async buildGameTransaction(
-    method: string,
-    amount: number,
-    choice: number,
-    clientSeed: Buffer,
-    gameRecordPda: PublicKey,
-    agentStatsPda: PublicKey
-  ): Promise<Transaction> {
-    // This would use the actual program IDL in production
-    // For now, we build the instruction manually
-    const discriminators: Record<string, Buffer> = {
-      coinFlip: Buffer.from([0xe5, 0x7c, 0x1f, 0x02, 0xa6, 0x8b, 0x22, 0xf8]),
-      diceRoll: Buffer.from([0xea, 0x49, 0x6c, 0xd7, 0x8c, 0x3c, 0x9c, 0x5a]),
-      limbo: Buffer.from([0xa0, 0xbf, 0x98, 0x88, 0x67, 0xcf, 0xd6, 0x9f]),
-      crash: Buffer.from([0x70, 0xba, 0x37, 0x35, 0x24, 0x26, 0x2b, 0x6e]),
-    };
-
-    // Limbo/crash take u16 multiplier; coinFlip/diceRoll take u8 choice
-    const choiceBuffer = (method === 'limbo' || method === 'crash')
-      ? Buffer.from(new Uint16Array([choice]).buffer)  // u16 little-endian (2 bytes)
-      : Buffer.from([choice]);                          // u8 (1 byte)
-
-    const instructionData = Buffer.concat([
-      discriminators[method],
-      new BN(amount).toArrayLike(Buffer, 'le', 8),
-      choiceBuffer,
-      clientSeed,
-    ]);
-
-    const ix = {
-      programId: PROGRAM_ID,
-      keys: [
-        { pubkey: this.housePda, isSigner: false, isWritable: true },
-        { pubkey: this.vaultPda, isSigner: false, isWritable: true },
-        { pubkey: gameRecordPda, isSigner: false, isWritable: true },
-        { pubkey: agentStatsPda, isSigner: false, isWritable: true },
-        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
-      data: instructionData,
-    };
-
-    return new Transaction().add(ix);
   }
 
   // === PvP Challenge Methods ===

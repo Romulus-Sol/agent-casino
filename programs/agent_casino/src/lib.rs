@@ -171,424 +171,6 @@ pub mod agent_casino {
         Ok(())
     }
 
-    /// Coin flip - 50/50 odds
-    pub fn coin_flip(
-        ctx: Context<PlayGame>,
-        amount: u64,
-        choice: u8,
-        client_seed: [u8; 32],
-    ) -> Result<()> {
-        require!(choice <= 1, CasinoError::InvalidChoice);
-
-        let house = &ctx.accounts.house;
-        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
-        require!(amount <= max_bet, CasinoError::BetTooLarge);
-        let max_payout = calculate_payout(amount, 2_00, house.house_edge_bps);
-        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
-
-        let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.player.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.house.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-        let result = (combined[0] % 2) as u8;
-
-        let won = result == choice;
-        let payout = if won {
-            max_payout
-        } else {
-            0
-        };
-
-        // Transfer bet to house account
-        let cpi_context = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house.to_account_info(),
-            },
-        );
-        system_program::transfer(cpi_context, amount)?;
-
-        // Transfer payout if won (house account is program-owned, can manipulate lamports)
-        if won && payout > 0 {
-            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
-            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
-        }
-
-        // Update house stats
-        let house = &mut ctx.accounts.house;
-        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        // Update agent stats
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        // agent_stats already initialized via init_agent_stats
-        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        // Record game
-        let game_record = &mut ctx.accounts.game_record;
-        game_record.player = ctx.accounts.player.key();
-        game_record.game_type = GameType::CoinFlip;
-        game_record.amount = amount;
-        game_record.choice = choice;
-        game_record.result = result;
-        game_record.payout = payout;
-        game_record.server_seed = server_seed;
-        game_record.client_seed = client_seed;
-        game_record.timestamp = clock.unix_timestamp;
-        game_record.slot = clock.slot;
-        game_record.bump = ctx.bumps.game_record;
-
-        emit!(GamePlayed {
-            player: ctx.accounts.player.key(),
-            game_type: GameType::CoinFlip,
-            amount,
-            choice,
-            result,
-            payout,
-            won,
-            server_seed,
-            client_seed,
-            slot: clock.slot,
-        });
-
-        Ok(())
-    }
-
-    /// Dice roll - choose target 1-5, win if roll <= target
-    pub fn dice_roll(
-        ctx: Context<PlayGame>,
-        amount: u64,
-        target: u8,
-        client_seed: [u8; 32],
-    ) -> Result<()> {
-        require!(target >= 1 && target <= 5, CasinoError::InvalidChoice);
-
-        let house = &ctx.accounts.house;
-        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
-        require!(amount <= max_bet, CasinoError::BetTooLarge);
-        // target validated 1-5 above, safe to divide
-        let multiplier = (600u64.checked_div(target as u64).ok_or(CasinoError::MathOverflow)?) as u16;
-        let max_payout = calculate_payout(amount, multiplier, house.house_edge_bps);
-        require!(house.pool >= max_payout, CasinoError::InsufficientLiquidity);
-
-        let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.player.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.house.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-        let raw = u32::from_le_bytes([combined[0], combined[1], combined[2], combined[3]]);
-        let result = ((raw % 6) + 1) as u8;
-
-        let won = result <= target;
-        let payout = if won {
-            max_payout
-        } else {
-            0
-        };
-
-        // Transfer bet to house account
-        let cpi_context = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house.to_account_info(),
-            },
-        );
-        system_program::transfer(cpi_context, amount)?;
-
-        if won && payout > 0 {
-            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
-            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
-        }
-
-        let house = &mut ctx.accounts.house;
-        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        // agent_stats already initialized via init_agent_stats
-        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let game_record = &mut ctx.accounts.game_record;
-        game_record.player = ctx.accounts.player.key();
-        game_record.game_type = GameType::DiceRoll;
-        game_record.amount = amount;
-        game_record.choice = target;
-        game_record.result = result;
-        game_record.payout = payout;
-        game_record.server_seed = server_seed;
-        game_record.client_seed = client_seed;
-        game_record.timestamp = clock.unix_timestamp;
-        game_record.slot = clock.slot;
-        game_record.bump = ctx.bumps.game_record;
-
-        emit!(GamePlayed {
-            player: ctx.accounts.player.key(),
-            game_type: GameType::DiceRoll,
-            amount,
-            choice: target,
-            result,
-            payout,
-            won,
-            server_seed,
-            client_seed,
-            slot: clock.slot,
-        });
-
-        Ok(())
-    }
-
-    /// Limbo - choose target multiplier, win if result >= target
-    pub fn limbo(
-        ctx: Context<PlayGame>,
-        amount: u64,
-        target_multiplier: u16,
-        client_seed: [u8; 32],
-    ) -> Result<()> {
-        require!(target_multiplier >= 101 && target_multiplier <= 10000, CasinoError::InvalidChoice);
-
-        let house = &ctx.accounts.house;
-        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
-        require!(amount <= max_bet, CasinoError::BetTooLarge);
-        // Calculate max payout for liquidity check using actual multiplier
-        let max_payout_128 = (amount as u128)
-            .checked_mul(target_multiplier as u128)
-            .ok_or(CasinoError::MathOverflow)?
-            / 100;
-        require!(max_payout_128 <= u64::MAX as u128, CasinoError::MathOverflow);
-        require!(house.pool >= max_payout_128 as u64, CasinoError::InsufficientLiquidity);
-
-        let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.player.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.house.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-
-        let raw = u32::from_le_bytes([combined[0], combined[1], combined[2], combined[3]]);
-        let result_multiplier = calculate_limbo_result(raw, house.house_edge_bps);
-
-        let won = result_multiplier >= target_multiplier;
-        let payout = if won {
-            max_payout_128 as u64
-        } else {
-            0
-        };
-
-        // Transfer bet to house account
-        let cpi_context = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house.to_account_info(),
-            },
-        );
-        system_program::transfer(cpi_context, amount)?;
-
-        if won && payout > 0 {
-            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
-            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
-        }
-
-        let house = &mut ctx.accounts.house;
-        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        // agent_stats already initialized via init_agent_stats
-        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let game_record = &mut ctx.accounts.game_record;
-        game_record.player = ctx.accounts.player.key();
-        game_record.game_type = GameType::Limbo;
-        game_record.amount = amount;
-        game_record.choice = (target_multiplier / 100).min(255) as u8;
-        game_record.result = (result_multiplier / 100).min(255) as u8;
-        game_record.payout = payout;
-        game_record.server_seed = server_seed;
-        game_record.client_seed = client_seed;
-        game_record.timestamp = clock.unix_timestamp;
-        game_record.slot = clock.slot;
-        game_record.bump = ctx.bumps.game_record;
-
-        emit!(LimboPlayed {
-            player: ctx.accounts.player.key(),
-            amount,
-            target_multiplier,
-            result_multiplier,
-            payout,
-            won,
-            server_seed,
-            client_seed,
-            slot: clock.slot,
-        });
-
-        Ok(())
-    }
-
-    /// Crash game - set a cashout multiplier, win if crash point >= your target
-    /// Uses exponential distribution where most games crash early but high multipliers possible
-    /// Multiplier range: 1.01x (101) to 100x (10000), represented as integers * 100
-    pub fn crash(
-        ctx: Context<PlayGame>,
-        amount: u64,
-        cashout_multiplier: u16,
-        client_seed: [u8; 32],
-    ) -> Result<()> {
-        require!(cashout_multiplier >= 101 && cashout_multiplier <= 10000, CasinoError::InvalidChoice);
-
-        let house = &ctx.accounts.house;
-        require!(amount >= house.min_bet, CasinoError::BetTooSmall);
-        let max_bet = house.pool.checked_mul(house.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
-        require!(amount <= max_bet, CasinoError::BetTooLarge);
-        // Calculate max payout for liquidity check using actual multiplier
-        let max_payout_128 = (amount as u128)
-            .checked_mul(cashout_multiplier as u128)
-            .ok_or(CasinoError::MathOverflow)?
-            / 100;
-        require!(max_payout_128 <= u64::MAX as u128, CasinoError::MathOverflow);
-        require!(house.pool >= max_payout_128 as u64, CasinoError::InsufficientLiquidity);
-
-        let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.player.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.house.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-
-        let raw = u32::from_le_bytes([combined[0], combined[1], combined[2], combined[3]]);
-        let crash_point = calculate_crash_point(raw, house.house_edge_bps);
-
-        // Player wins if the crash point is >= their cashout multiplier
-        let won = crash_point >= cashout_multiplier;
-        let payout = if won {
-            max_payout_128 as u64
-        } else {
-            0
-        };
-
-        // Transfer bet to house account
-        let cpi_context = CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.player.to_account_info(),
-                to: ctx.accounts.house.to_account_info(),
-            },
-        );
-        system_program::transfer(cpi_context, amount)?;
-
-        if won && payout > 0 {
-            **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
-            **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
-        }
-
-        let house = &mut ctx.accounts.house;
-        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        house.total_volume = house.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
-            house.pool = house.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            house.pool = house.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        // agent_stats already initialized via init_agent_stats
-        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        let game_record = &mut ctx.accounts.game_record;
-        game_record.player = ctx.accounts.player.key();
-        game_record.game_type = GameType::Crash;
-        game_record.amount = amount;
-        game_record.choice = (cashout_multiplier / 100).min(255) as u8;
-        game_record.result = (crash_point / 100).min(255) as u8;
-        game_record.payout = payout;
-        game_record.server_seed = server_seed;
-        game_record.client_seed = client_seed;
-        game_record.timestamp = clock.unix_timestamp;
-        game_record.slot = clock.slot;
-        game_record.bump = ctx.bumps.game_record;
-
-        emit!(CrashPlayed {
-            player: ctx.accounts.player.key(),
-            amount,
-            cashout_multiplier,
-            crash_point,
-            payout,
-            won,
-            server_seed,
-            client_seed,
-            slot: clock.slot,
-        });
-
-        Ok(())
-    }
-
     /// Get house stats
     pub fn get_house_stats(ctx: Context<GetHouseStats>) -> Result<HouseStats> {
         let house = &ctx.accounts.house;
@@ -1978,9 +1560,49 @@ pub mod agent_casino {
                 **ctx.accounts.poster.to_account_info().try_borrow_mut_lamports()? += refund;
             }
 
-            // Note: Winning arbiter stake payouts require remaining_accounts pattern
-            // for individual transfers. For simplicity, stakes remain in arbitration PDA
-            // and can be recovered via close_arbitration instruction (future improvement).
+            // Pay winning arbiters: stake back + proportional share of losing stakes
+            // Collect payout data first to avoid borrow conflicts
+            let winning_side = hunter_wins;
+            let mut winning_total: u64 = 0;
+            let mut losing_total: u64 = 0;
+            for (i, vote) in arbitration.votes.iter().enumerate() {
+                if *vote == winning_side {
+                    winning_total = winning_total.checked_add(arbitration.stakes[i]).ok_or(CasinoError::MathOverflow)?;
+                } else {
+                    losing_total = losing_total.checked_add(arbitration.stakes[i]).ok_or(CasinoError::MathOverflow)?;
+                }
+            }
+
+            let mut payouts: Vec<(Pubkey, u64)> = Vec::new();
+            for (i, vote) in arbitration.votes.iter().enumerate() {
+                if *vote == winning_side {
+                    let bonus = if winning_total > 0 {
+                        (losing_total as u128)
+                            .checked_mul(arbitration.stakes[i] as u128)
+                            .ok_or(CasinoError::MathOverflow)?
+                            .checked_div(winning_total as u128)
+                            .unwrap_or(0) as u64
+                    } else {
+                        0
+                    };
+                    let share = arbitration.stakes[i].checked_add(bonus).ok_or(CasinoError::MathOverflow)?;
+                    payouts.push((arbitration.arbiters[i], share));
+                }
+            }
+            let saved_votes_approve = arbitration.votes_approve;
+            let saved_votes_reject = arbitration.votes_reject;
+
+            // Transfer arbiter rewards via remaining_accounts
+            let remaining = ctx.remaining_accounts;
+            require!(remaining.len() >= payouts.len(), CasinoError::InvalidRemainingAccounts);
+            let arbitration_info = ctx.accounts.arbitration.to_account_info();
+            for (idx, (expected_key, share)) in payouts.iter().enumerate() {
+                let arbiter_account = &remaining[idx];
+                require!(arbiter_account.key() == *expected_key, CasinoError::InvalidRemainingAccounts);
+                require!(arbiter_account.is_writable, CasinoError::InvalidRemainingAccounts);
+                **arbitration_info.try_borrow_mut_lamports()? -= share;
+                **arbiter_account.try_borrow_mut_lamports()? += share;
+            }
 
             let clock = Clock::get()?;
             let hit = &mut ctx.accounts.hit;
@@ -1996,8 +1618,8 @@ pub mod agent_casino {
             emit!(ArbitrationResolved {
                 hit: ctx.accounts.hit.key(),
                 hunter_wins,
-                votes_approve: arbitration.votes_approve,
-                votes_reject: arbitration.votes_reject,
+                votes_approve: saved_votes_approve,
+                votes_reject: saved_votes_reject,
             });
         }
 
@@ -2108,127 +1730,6 @@ pub mod agent_casino {
             provider: ctx.accounts.provider.key(),
             amount,
             total_pool: vault.pool,
-        });
-
-        Ok(())
-    }
-
-    /// Token coin flip - 50/50 odds with SPL tokens
-    pub fn token_coin_flip(
-        ctx: Context<TokenCoinFlip>,
-        amount: u64,
-        choice: u8,
-        client_seed: [u8; 32],
-    ) -> Result<()> {
-        require!(choice <= 1, CasinoError::InvalidChoice);
-
-        let vault = &ctx.accounts.token_vault;
-        require!(amount >= vault.min_bet, CasinoError::BetTooSmall);
-        let max_bet = vault.pool.checked_mul(vault.max_bet_percent as u64).ok_or(CasinoError::MathOverflow)? / 100;
-        require!(amount <= max_bet, CasinoError::BetTooLarge);
-        let max_payout = calculate_payout(amount, 2_00, vault.house_edge_bps);
-        require!(vault.pool >= max_payout, CasinoError::InsufficientLiquidity);
-
-        let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.player.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.token_vault.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.player.key());
-        let result = (combined[0] % 2) as u8;
-
-        let won = result == choice;
-        let payout = if won {
-            max_payout
-        } else {
-            0
-        };
-
-        // Transfer bet from player to vault
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.player_ata.to_account_info(),
-            to: ctx.accounts.vault_ata.to_account_info(),
-            authority: ctx.accounts.player.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
-        token::transfer(cpi_ctx, amount)?;
-
-        // Transfer payout if won (vault is PDA, needs seeds for signing)
-        if won && payout > 0 {
-            let mint_key = ctx.accounts.mint.key();
-            let seeds = &[
-                b"token_vault",
-                mint_key.as_ref(),
-                &[vault.bump],
-            ];
-            let signer_seeds = &[&seeds[..]];
-
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.vault_ata.to_account_info(),
-                to: ctx.accounts.player_ata.to_account_info(),
-                authority: ctx.accounts.token_vault.to_account_info(),
-            };
-            let cpi_ctx = CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                cpi_accounts,
-                signer_seeds,
-            );
-            token::transfer(cpi_ctx, payout)?;
-        }
-
-        // Update vault stats
-        let vault = &mut ctx.accounts.token_vault;
-        vault.total_games = vault.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        vault.total_volume = vault.total_volume.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            vault.total_payout = vault.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            let net_loss = payout.checked_sub(amount).ok_or(CasinoError::MathOverflow)?;
-            vault.pool = vault.pool.checked_sub(net_loss).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            vault.pool = vault.pool.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        // Update agent stats (shared with SOL games)
-        let agent_stats = &mut ctx.accounts.agent_stats;
-        // agent_stats already initialized via init_agent_stats
-        agent_stats.total_games = agent_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        agent_stats.total_wagered = agent_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
-        if won {
-            agent_stats.total_won = agent_stats.total_won.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-            agent_stats.wins = agent_stats.wins.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        } else {
-            agent_stats.losses = agent_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
-        }
-
-        // Record game
-        let game_record = &mut ctx.accounts.game_record;
-        game_record.player = ctx.accounts.player.key();
-        game_record.mint = ctx.accounts.mint.key();
-        game_record.game_type = GameType::CoinFlip;
-        game_record.amount = amount;
-        game_record.choice = choice;
-        game_record.result = result;
-        game_record.payout = payout;
-        game_record.server_seed = server_seed;
-        game_record.client_seed = client_seed;
-        game_record.timestamp = clock.unix_timestamp;
-        game_record.slot = clock.slot;
-        game_record.bump = ctx.bumps.game_record;
-
-        emit!(TokenGamePlayed {
-            player: ctx.accounts.player.key(),
-            mint: ctx.accounts.mint.key(),
-            game_type: GameType::CoinFlip,
-            amount,
-            choice,
-            result,
-            payout,
-            won,
-            server_seed,
-            client_seed,
-            slot: clock.slot,
         });
 
         Ok(())
@@ -3074,6 +2575,7 @@ pub mod agent_casino {
 
 // === Helper Functions ===
 
+/// Seed generation for PvP challenges (clock-based, acceptable for 2-player games)
 fn generate_seed(player: Pubkey, slot: u64, timestamp: i64, house: Pubkey) -> [u8; 32] {
     let data = [
         player.to_bytes().as_ref(),
@@ -3277,39 +2779,6 @@ pub struct ExpireVrfRequest<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct PlayGame<'info> {
-    #[account(mut, seeds = [b"house"], bump = house.bump)]
-    pub house: Account<'info, House>,
-
-    /// CHECK: PDA vault
-    #[account(
-        mut,
-        seeds = [b"vault", house.key().as_ref()],
-        bump
-    )]
-    pub house_vault: AccountInfo<'info>,
-
-    #[account(
-        init,
-        payer = player,
-        space = 8 + GameRecord::INIT_SPACE,
-        seeds = [b"game", house.key().as_ref(), &house.total_games.to_le_bytes()],
-        bump
-    )]
-    pub game_record: Account<'info, GameRecord>,
-
-    #[account(
-        mut,
-        seeds = [b"agent", player.key().as_ref()],
-        bump
-    )]
-    pub agent_stats: Account<'info, AgentStats>,
-
-    #[account(mut)]
-    pub player: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
 
 #[derive(Accounts)]
 pub struct GetHouseStats<'info> {
@@ -4006,51 +3475,6 @@ pub struct TokenAddLiquidity<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct TokenCoinFlip<'info> {
-    #[account(
-        mut,
-        seeds = [b"token_vault", mint.key().as_ref()],
-        bump = token_vault.bump
-    )]
-    pub token_vault: Account<'info, TokenVault>,
-
-    /// CHECK: SPL token mint
-    pub mint: UncheckedAccount<'info>,
-
-    /// CHECK: Vault's token account
-    #[account(
-        mut,
-        seeds = [b"token_vault_ata", mint.key().as_ref()],
-        bump
-    )]
-    pub vault_ata: UncheckedAccount<'info>,
-
-    #[account(
-        init,
-        payer = player,
-        space = 8 + TokenGameRecord::INIT_SPACE,
-        seeds = [b"token_game", token_vault.key().as_ref(), &token_vault.total_games.to_le_bytes()],
-        bump
-    )]
-    pub game_record: Account<'info, TokenGameRecord>,
-
-    #[account(
-        mut,
-        seeds = [b"agent", player.key().as_ref()],
-        bump
-    )]
-    pub agent_stats: Account<'info, AgentStats>,
-
-    /// CHECK: Player's token account - validated by token program
-    #[account(mut)]
-    pub player_ata: UncheckedAccount<'info>,
-
-    #[account(mut)]
-    pub player: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
-}
 
 // === Switchboard VRF Contexts ===
 
@@ -4384,6 +3808,7 @@ pub struct LpPosition {
     pub bump: u8,
 }
 
+/// Legacy: No longer created (non-VRF games removed), kept for CloseGameRecord rent recovery
 #[account]
 #[derive(InitSpace)]
 pub struct GameRecord {
@@ -4780,45 +4205,6 @@ pub struct VrfExpired {
     pub refund: u64,
 }
 
-#[event]
-pub struct GamePlayed {
-    pub player: Pubkey,
-    pub game_type: GameType,
-    pub amount: u64,
-    pub choice: u8,
-    pub result: u8,
-    pub payout: u64,
-    pub won: bool,
-    pub server_seed: [u8; 32],
-    pub client_seed: [u8; 32],
-    pub slot: u64,
-}
-
-#[event]
-pub struct LimboPlayed {
-    pub player: Pubkey,
-    pub amount: u64,
-    pub target_multiplier: u16,
-    pub result_multiplier: u16,
-    pub payout: u64,
-    pub won: bool,
-    pub server_seed: [u8; 32],
-    pub client_seed: [u8; 32],
-    pub slot: u64,
-}
-
-#[event]
-pub struct CrashPlayed {
-    pub player: Pubkey,
-    pub amount: u64,
-    pub cashout_multiplier: u16,
-    pub crash_point: u16,
-    pub payout: u64,
-    pub won: bool,
-    pub server_seed: [u8; 32],
-    pub client_seed: [u8; 32],
-    pub slot: u64,
-}
 
 #[event]
 pub struct ChallengeCreated {
@@ -5520,4 +4906,6 @@ pub enum CasinoError {
     CannotSelfArbitrate,
     #[msg("Insufficient pool balance for withdrawal")]
     InsufficientPoolBalance,
+    #[msg("Invalid remaining accounts for arbiter payouts")]
+    InvalidRemainingAccounts,
 }

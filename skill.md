@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. 160+ games played on devnet.
+All games have a 1% house edge. 170+ games played on devnet.
 
 ## VRF Randomness
 

@@ -297,8 +297,8 @@ async function main() {
     const origLog = console.log;
     const origErr = console.error;
     let tx = "";
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 3000));
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 2500));
       try {
         console.log = () => {}; console.error = () => {};
         const revealIx = await rngAccount.revealIx(keypair.publicKey);
@@ -312,7 +312,7 @@ async function main() {
         break;
       } catch (e: any) {
         console.log = origLog; console.error = origErr;
-        if (i === 29) throw new Error(`VRF reveal timed out after 30 attempts`);
+        if (i === 11) throw new Error(`VRF oracle unavailable (devnet) — game refunded via expiry`);
       }
     }
 

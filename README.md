@@ -478,7 +478,7 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 | **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 160+ |
+| **Games Played** | 170+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
 | **Vulnerabilities Fixed** | 98 (across 7 audits, 0 remaining) |
 
@@ -493,6 +493,7 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 
 ## Links
 
+- [Live Demo](https://asciinema.org/a/uCppJr8oE1dhAyrY) — Full feature showcase (all 4 VRF games, PvP, Memory Slots, Hitman, Pyth predictions, WARGAMES)
 - [Skill File](skill.md) — For agent discovery and integration
 - [Full Feature Docs](FEATURES.md) — API reference and detailed docs
 - [GitHub](https://github.com/Romulus-Sol/agent-casino)

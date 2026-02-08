@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. **Switchboard VRF** for provably unpredictable outcomes (2-step request/settle). Non-VRF instructions removed — VRF is the only randomness path. Integer-only math (no floating-point). Six security audits: 93 vulnerabilities found and fixed, zero remaining. 80 automated tests (69 SDK + 11 on-chain).
+All games have a 1% house edge. **Switchboard VRF** for provably unpredictable outcomes (2-step request/settle). Non-VRF instructions removed — VRF is the only randomness path. Integer-only math (no floating-point). Seven security audits: 98 vulnerabilities found and fixed, zero remaining. 80 automated tests (69 SDK + 11 on-chain).
 
 ## SPL Token Games
 

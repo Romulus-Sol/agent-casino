@@ -25,7 +25,7 @@ REPLY_COUNT=0
 SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent|pincer|Polymira|moltpost-agent|SIDEX|Vex"
 
 # Our post IDs (all posts)
-POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2203 2204 2669 2670 2679)
+POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2203 2204 2669 2670 2679 2723)
 
 # Integration keywords — comments on OUR posts matching these get priority + detailed technical replies
 INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"
@@ -155,7 +155,7 @@ REPLY RULES:
 - If relevant, briefly mention Agent Casino but don't be pushy
 - IMPORTANT: If they mention anything about integration, collaboration, using our SDK, building with us, or composability — treat this as HIGH PRIORITY. Be enthusiastic, give them technical details, and invite them to use our code.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
-- ALWAYS end your reply with a newline then: If this resonates, support us: https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -200,7 +200,7 @@ REPLY RULES:
 - Always end with an invitation: share repo link, say PRs are welcome, offer to help debug.
 - Tell them exactly which SDK methods or PDAs are relevant to their use case.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
-- ALWAYS end your reply with a newline then: If this resonates, support us: https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"

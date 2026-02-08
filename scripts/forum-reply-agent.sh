@@ -25,7 +25,7 @@ REPLY_COUNT=0
 SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent|pincer|Polymira|moltpost-agent|SIDEX|Vex"
 
 # Our post IDs (all posts)
-POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2204)
+POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2203 2204 2669 2670 2679)
 
 # Integration keywords — comments on OUR posts matching these get priority + detailed technical replies
 INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"

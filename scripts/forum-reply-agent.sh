@@ -27,8 +27,11 @@ SPAM_BOTS="Sipher|Mereum|ClaudeCraft|neptu|IBRL-agent|pincer|Polymira|moltpost-a
 # Our post IDs (all posts)
 POST_IDS=(426 429 434 437 446 502 506 508 509 511 524 550 558 559 561 762 765 786 797 803 815 817 827 841 852 870 877 882 886 975 976 1009 1010 1641 1645 1652 1659 1671 1676 1689 1699 1710 1732 1749 1767 1896 1903 2153 2162 2164 2191 2204)
 
-# Integration keywords — comments matching these get priority + detailed technical replies
+# Integration keywords — comments on OUR posts matching these get priority + detailed technical replies
 INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"
+
+# Outreach keywords — for scanning OTHER agents' posts (Phase 2). Much tighter: only DeFi/gaming/betting adjacent
+OUTREACH_KEYWORDS="casino|gambling|betting.*agent|wagering|dice|coin.?flip|slot.?machine|provably.fair|house.edge|liquidity.pool|LP.*yield|DeFi.*game|game.*DeFi|on-chain.*game|prediction.market|bounty.*escrow|x402|payment.*gate"
 
 # Vote-mention keywords — detect agents claiming they voted
 VOTE_KEYWORDS="voted|upvoted|got my vote|have my vote|gave.*vote|voting for|support.*vote|just voted"
@@ -320,10 +323,10 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
             # Skip if already engaged
             already_engaged "$POST_ID" && continue
 
-            # Check if post DIRECTLY mentions our project or has strong integration signal
-            # Narrow matching: only posts that explicitly mention us or use integration keywords
+            # Check if post is directly relevant to our domain (DeFi gaming, betting, casino)
+            # or explicitly mentions us. Generic "collaboration" posts don't qualify.
             INTEGRATION_MATCH=false
-            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$INTEGRATION_KEYWORDS|Agent.Casino|Romulus.Sol|casino.*protocol"; then
+            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS|Agent.Casino|Romulus.Sol|Claude.the.Romulan"; then
                 INTEGRATION_MATCH=true
             fi
 
@@ -431,7 +434,14 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
                 continue
             fi
 
-            # Check if this post mentions integration or could be a collaboration opportunity
+            # Only engage with hot posts relevant to our domain
+            IS_RELEVANT=false
+            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS|Agent.Casino|Romulus.Sol|Claude.the.Romulan|DeFi|trading.*bot|yield|treasury|escrow|oracle|VRF|randomness"; then
+                IS_RELEVANT=true
+            fi
+            [ "$IS_RELEVANT" = false ] && continue
+
+            # Check if it's specifically an integration opportunity
             IS_INTEGRATION=false
             if is_integration_comment "$POST_BODY" || is_integration_comment "$POST_TITLE"; then
                 IS_INTEGRATION=true
@@ -440,7 +450,7 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
             if [ "$IS_INTEGRATION" = true ]; then
                 log "*** INTEGRATION OPPORTUNITY in hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
             else
-                log "Engaging with hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
+                log "Engaging with relevant hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
             fi
 
             # Generate engagement comment
@@ -450,7 +460,7 @@ Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 500 chars): ${POST_BODY:0:500}
 
-Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive — ask a specific question, share a relevant insight, or offer to collaborate. If their project could integrate with Agent Casino (on-chain games, SDK, VRF, bounties, prediction markets), mention how and give them technical details."
+Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive — ask a specific question or share a relevant insight. Only mention Agent Casino if there's a genuine technical connection to what they're building."
 
             if [ "$IS_INTEGRATION" = true ]; then
                 REPLY=$(generate_integration_reply "$CONTEXT")

@@ -5,11 +5,12 @@
  * Usage: npx ts-node demo/full-showcase.ts
  */
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL, clusterApiUrl } from "@solana/web3.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL, clusterApiUrl, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { AgentCasino } from "../sdk/src";
 import { HitmanMarket } from "../sdk/src/hitman";
 import { loadWallet } from "../scripts/utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
+import * as sb from "@switchboard-xyz/on-demand";
 import * as fs from "fs";
 
 const PROGRAM_ID = new PublicKey("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
@@ -181,8 +182,8 @@ function printHeader() {
   console.log(`    ${PURPLE}${B}Built by an AI Agent${R}  ${DIM}🤖${R}  ${CYN}${B}For AI Agents${R}`);
   blank();
   console.log(`    ${DIM}Program${R} ${TEAL}${B}5bo6H5rn...93zvV${R}  ${DIM}│${R}  ${DIM}Network${R} ${GRN}${B}Solana Devnet${R}`);
-  console.log(`    ${DIM}Games${R} ${GOLD}${B}4${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓${R}  ${DIM}│${R}  ${DIM}SDK${R} ${CYN}${B}42+ methods${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}69${R}`);
-  console.log(`    ${DIM}Audits${R} ${GOLD}${B}4${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}55${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
+  console.log(`    ${DIM}Games${R} ${GOLD}${B}4${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}SDK${R} ${CYN}${B}42+ methods${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}80${R}`);
+  console.log(`    ${DIM}Audits${R} ${GOLD}${B}6${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}93${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
   blank();
   console.log(`    ${DIM}${"─".repeat(60)}${R}`);
 }
@@ -197,6 +198,134 @@ async function main() {
   const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
   const { keypair, address } = loadWallet();
   const casino = new AgentCasino(connection, keypair);
+
+  // Setup Switchboard VRF
+  const wallet = new anchor.Wallet(keypair);
+  const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
+  anchor.setProvider(provider);
+  const sbIdl = await anchor.Program.fetchIdl(sb.ON_DEMAND_DEVNET_PID, provider);
+  const sbProgram = sbIdl ? new anchor.Program(sbIdl, provider) : null;
+
+  // VRF helper: manual flow — create → request → commit → reveal+settle in same TX
+  // The settle MUST be in the same TX as reveal (Switchboard checks clock_slot == reveal_slot)
+  async function vrfPlayGame(
+    gameType: "coinflip" | "dice" | "limbo" | "crash",
+    amountSol: number,
+    param: any, // choice/target/multiplier
+  ): Promise<{ won: boolean; payout: number; result: number; tx: string }> {
+    if (!sbProgram) throw new Error("Switchboard not available");
+    await casino.loadProgram();
+    const program = (casino as any).program;
+    const housePda = (casino as any).housePda;
+
+    // Step 1: Create randomness account (NO commit yet)
+    const rngKeypair = anchor.web3.Keypair.generate();
+    const [rngAccount, createIx] = await sb.Randomness.create(
+      sbProgram as any, rngKeypair, sb.ON_DEMAND_DEVNET_QUEUE, keypair.publicKey);
+    await provider.sendAndConfirm(new Transaction().add(createIx), [keypair, rngKeypair]);
+
+    // Step 2: Send VRF request (locks bet)
+    const houseAccount = await program.account.house.fetch(housePda);
+    const amount = new anchor.BN(amountSol * LAMPORTS_PER_SOL);
+    let seedPrefix: string;
+    let requestMethod: string;
+    let settleMethod: string;
+    let requestArgs: any[];
+
+    switch (gameType) {
+      case "coinflip":
+        seedPrefix = "vrf_request";
+        requestMethod = "vrfCoinFlipRequest";
+        settleMethod = "vrfCoinFlipSettle";
+        requestArgs = [amount, param === "heads" ? 0 : 1];
+        break;
+      case "dice":
+        seedPrefix = "vrf_dice";
+        requestMethod = "vrfDiceRollRequest";
+        settleMethod = "vrfDiceRollSettle";
+        requestArgs = [amount, param];
+        break;
+      case "limbo":
+        seedPrefix = "vrf_limbo";
+        requestMethod = "vrfLimboRequest";
+        settleMethod = "vrfLimboSettle";
+        requestArgs = [amount, Math.floor(param * 100)];
+        break;
+      case "crash":
+        seedPrefix = "vrf_crash";
+        requestMethod = "vrfCrashRequest";
+        settleMethod = "vrfCrashSettle";
+        requestArgs = [amount, Math.floor(param * 100)];
+        break;
+    }
+
+    const [vrfRequestPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from(seedPrefix), keypair.publicKey.toBuffer(),
+       houseAccount.totalGames.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID);
+
+    await program.methods[requestMethod](...requestArgs)
+      .accounts({
+        house: housePda,
+        vrfRequest: vrfRequestPda,
+        randomnessAccount: rngAccount.pubkey,
+        player: keypair.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      }).rpc();
+
+    // Step 3: Commit randomness (separate TX, after request)
+    const commitIx = await rngAccount.commitIx(sb.ON_DEMAND_DEVNET_QUEUE, keypair.publicKey);
+    await provider.sendAndConfirm(new Transaction().add(commitIx), [keypair]);
+
+    // Step 4: Build settle instruction
+    const [agentStatsPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("agent"), keypair.publicKey.toBuffer()], PROGRAM_ID);
+
+    const settleIx = await program.methods[settleMethod]()
+      .accounts({
+        house: housePda,
+        vrfRequest: vrfRequestPda,
+        agentStats: agentStatsPda,
+        randomnessAccount: rngAccount.pubkey,
+        player: keypair.publicKey,
+        settler: keypair.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      }).instruction();
+
+    // Step 5: Wait for oracle, then reveal+settle in SAME TX (same slot!)
+    // Suppress Switchboard's noisy internal error logging during retries
+    const origLog = console.log;
+    const origErr = console.error;
+    let tx = "";
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        console.log = () => {}; console.error = () => {};
+        const revealIx = await rngAccount.revealIx(keypair.publicKey);
+        console.log = origLog; console.error = origErr;
+        const combinedTx = new Transaction()
+          .add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 75000 }))
+          .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }))
+          .add(revealIx)
+          .add(settleIx);
+        tx = await provider.sendAndConfirm(combinedTx, [keypair]);
+        break;
+      } catch (e: any) {
+        console.log = origLog; console.error = origErr;
+        if (i === 29) throw new Error(`VRF reveal timed out after 30 attempts`);
+      }
+    }
+
+    // Step 6: Read result
+    const settled = await program.account.vrfRequest.fetch(vrfRequestPda);
+    const payout = settled.payout.toNumber() / LAMPORTS_PER_SOL;
+    return {
+      won: payout > 0,
+      payout,
+      result: settled.result,
+      tx: tx || "settled-via-vrf",
+    };
+  }
 
   const balance = await connection.getBalance(keypair.publicKey);
   blank();
@@ -231,17 +360,18 @@ async function main() {
   // ══════════════════════════════════════════════════════════════
   // SECTION 2: COIN FLIP
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(2, "Coin Flip  (Commit-Reveal SHA-256)", "🪙");
-  console.log(`    ${DIM}50/50 odds  ~1.98x payout  SHA-256(server || client || player)${R}`);
-  await spinner("Flipping coin on-chain...", 1500);
+  sectionHeader(2, "Coin Flip  (Switchboard VRF)", "🪙");
+  console.log(`    ${DIM}50/50 odds  ~1.98x payout  Switchboard VRF randomness${R}`);
 
   try {
-    const flip = await casino.coinFlip(0.001, "heads");
-    const choiceStr = flip.choice === 0 ? "Heads" : "Tails";
-    const resultStr = flip.result === 0 ? "Heads" : "Tails";
-    resultBox(flip.won, "Coin Flip", [
+    await spinner("VRF: create → request → oracle → reveal+settle...", 1000);
+    const flip = await vrfPlayGame("coinflip", 0.001, "heads");
+    const choiceStr = "Heads";
+    const resultStr = flip.won ? "Heads" : "Tails";
+    resultBox(flip.won, "Coin Flip (VRF)", [
       `    ${DIM}Choice${R}  ${LIME}${B}${choiceStr}${R}    ${DIM}Result${R}  ${GOLD}${B}${resultStr}${R}    ${DIM}Payout${R}  ${GOLD}${B}${sol(flip.payout)} SOL${R}`,
-      `    ${DIM}TX${R} ${TEAL}${shortAddr(flip.txSignature)}${R}   ${DIM}Seed${R} ${PURPLE}${shortAddr(flip.serverSeed)}${R}`,
+      `    ${DIM}VRF${R} ${PURPLE}Switchboard on-demand${R}   ${DIM}Settled in same slot as reveal${R}`,
+      `    ${DIM}TX${R}  ${TEAL}${flip.tx}${R}`,
     ].join("\n"));
   } catch (err: any) {
     console.log(`    ${RED}Coin flip failed: ${err.message}${R}`);
@@ -249,9 +379,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 3: VRF COIN FLIP (Switchboard)
+  // SECTION 3: HOW VRF WORKS (Switchboard)
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(3, "VRF Coin Flip  (Switchboard Randomness)", "🔐");
+  sectionHeader(3, "How VRF Works  (Under the Hood)", "🔐");
   console.log(`    ${DIM}Switchboard VRF provides provably unpredictable randomness${R}`);
   console.log(`    ${DIM}2-step:${R} ${PURPLE}Request${R} ${DIM}→${R} ${TEAL}Oracle fulfills${R} ${DIM}→${R} ${GRN}Settle${R}`);
   blank();
@@ -283,7 +413,7 @@ async function main() {
       console.log(`      ${color}${B}✓${R} ${B}${name}${R}  ${DIM}→${R}  ${PURPLE}${req}()${R} ${DIM}/${R} ${TEAL}${settle}()${R}`);
     }
     blank();
-    console.log(`    ${DIM}Dual path: commit-reveal (fast) OR VRF (provable). Agent chooses.${R}`);
+    console.log(`    ${DIM}VRF-only: all games use Switchboard for provably fair randomness.${R}`);
   } catch (err: any) {
     console.log(`    ${RED}VRF demo: ${err.message}${R}`);
   }
@@ -294,15 +424,16 @@ async function main() {
   // ══════════════════════════════════════════════════════════════
   sectionHeader(4, "Dice Roll  (Target: 3)", "🎲");
   console.log(`    ${DIM}Win if roll <= target.  Target 3 = 50% chance, ~2x payout${R}`);
-  await spinner("Rolling dice on-chain...", 1500);
 
   try {
-    const dice = await casino.diceRoll(0.001, 3);
+    await spinner("VRF: create → request → oracle → reveal+settle...", 1000);
+    const dice = await vrfPlayGame("dice", 0.001, 3);
     const target = 3;
     const multiplier = (6 / target * 0.99).toFixed(2);
     resultBox(dice.won, `Dice Roll (target <= ${target})`, [
       `    ${DIM}Roll${R}  ${ORANGE}${B}${dice.result}${R}    ${DIM}Target${R}  ${GOLD}${B}<=${target}${R}    ${DIM}Mult${R}  ${CYN}${B}${multiplier}x${R}    ${DIM}Payout${R}  ${GOLD}${B}${sol(dice.payout)} SOL${R}`,
-      `    ${DIM}TX${R} ${TEAL}${shortAddr(dice.txSignature)}${R}`,
+      `    ${DIM}VRF${R} ${PURPLE}Switchboard on-demand${R}`,
+      `    ${DIM}TX${R}  ${TEAL}${dice.tx}${R}`,
     ].join("\n"));
 
     blank();
@@ -327,16 +458,17 @@ async function main() {
   // ══════════════════════════════════════════════════════════════
   sectionHeader(5, "Limbo  (Target: 2.0x)", "🚀");
   console.log(`    ${DIM}Win if result >= target.  Higher target = bigger payout, lower chance${R}`);
-  await spinner("Playing limbo on-chain...", 1500);
 
   try {
-    const limbo = await casino.limbo(0.001, 2.0);
+    await spinner("VRF: create → request → oracle → reveal+settle...", 1000);
+    const limbo = await vrfPlayGame("limbo", 0.001, 2.0);
     const resultDisplay = limbo.won
       ? (limbo.payout / 0.001).toFixed(2)
-      : (limbo.result > 0 ? `~${limbo.result}.xx` : "< 2.00");
+      : "< 2.00";
     resultBox(limbo.won, `Limbo (target >= 2.00x)`, [
       `    ${DIM}Result${R}  ${MAG}${B}${resultDisplay}x${R}    ${DIM}Target${R}  ${PURPLE}${B}>=2.00x${R}    ${DIM}Payout${R}  ${GOLD}${B}${sol(limbo.payout)} SOL${R}`,
-      `    ${DIM}TX${R} ${TEAL}${shortAddr(limbo.txSignature)}${R}`,
+      `    ${DIM}VRF${R} ${PURPLE}Switchboard on-demand${R}`,
+      `    ${DIM}TX${R}  ${TEAL}${limbo.tx}${R}`,
     ].join("\n"));
   } catch (err: any) {
     console.log(`    ${RED}Limbo failed: ${err.message}${R}`);
@@ -349,10 +481,10 @@ async function main() {
   sectionHeader(6, "Crash  (Cashout: 1.5x)", "💥");
   console.log(`    ${DIM}Crashes at random point.  Win if crash >= cashout target${R}`);
   console.log(`    ${DIM}Integer-only math (u128 fixed-point, no floats on-chain)${R}`);
-  await spinner("Playing crash on-chain...", 1500);
 
   try {
-    const crash = await casino.crash(0.001, 1.5);
+    await spinner("VRF: create → request → oracle → reveal+settle...", 1000);
+    const crash = await vrfPlayGame("crash", 0.001, 1.5);
     const crashDisplay = crash.won
       ? (crash.payout / 0.001).toFixed(2)
       : (crash.result > 0 ? `${crash.result}.xx` : "1.xx");
@@ -377,7 +509,8 @@ async function main() {
 
     resultBox(crash.won, `Crash (cashout @ 1.50x)`, [
       `    ${DIM}Crash Point${R}  ${CORAL}${B}${crashDisplay}x${R}    ${DIM}Cashout${R}  ${GOLD}${B}1.50x${R}    ${DIM}Payout${R}  ${GOLD}${B}${sol(crash.payout)} SOL${R}`,
-      `    ${DIM}TX${R} ${TEAL}${shortAddr(crash.txSignature)}${R}`,
+      `    ${DIM}VRF${R} ${PURPLE}Switchboard on-demand${R}`,
+      `    ${DIM}TX${R}  ${TEAL}${crash.tx}${R}`,
     ].join("\n"));
   } catch (err: any) {
     console.log(`    ${RED}Crash failed: ${err.message}${R}`);
@@ -396,11 +529,11 @@ async function main() {
     blank();
     console.log(`    ${BGMAG}${B}${WHT}  CHALLENGE CREATED  ${R}`);
     blank();
-    statLine("Challenge PDA  ", `${TEAL}${B}${shortAddr(pvp.challengeAddress)}${R}`);
+    statLine("Challenge PDA  ", `${TEAL}${B}${pvp.challengeAddress}${R}`);
     statLine("Bet Amount     ", `${GOLD}${B}0.0010 SOL${R}`);
     statLine("Your Pick      ", `${LIME}${B}Heads${R}`);
     statLine("Status         ", `${ORANGE}${B}Waiting for opponent...${R}`);
-    statLine("TX             ", `${TEAL}${shortAddr(pvp.tx)}${R}`);
+    statLine("TX             ", `${TEAL}${pvp.tx}${R}`);
     blank();
     console.log(`    ${DIM}Accept:${R}  ${WHT}casino.acceptChallenge("${shortAddr(pvp.challengeAddress)}")${R}`);
     console.log(`    ${DIM}Winner takes 99% of pot (1% house edge). On-chain escrow.${R}`);
@@ -509,12 +642,12 @@ async function main() {
     blank();
     console.log(`    ${BGGRN}${B}${WHT}  PREDICTION CREATED  ${R}`);
     blank();
-    statLine("Prediction PDA ", `${TEAL}${B}${shortAddr(prediction.predictionAddress)}${R}`);
+    statLine("Prediction PDA ", `${TEAL}${B}${prediction.predictionAddress}${R}`);
     statLine("Asset          ", `${GOLD}${B}BTC/USD${R}`);
     statLine("Direction      ", `${GRN}${B}ABOVE${R} ${WHT}$100,000${R}`);
     statLine("Duration       ", `${CYN}${B}3600s${R} ${DIM}(1 hour)${R}`);
     statLine("Bet Amount     ", `${GOLD}${B}0.0010 SOL${R}`);
-    statLine("TX             ", `${TEAL}${shortAddr(prediction.tx)}${R}`);
+    statLine("TX             ", `${TEAL}${prediction.tx}${R}`);
     blank();
     console.log(`    ${DIM}Pyth Feeds:${R}  ${GOLD}BTC${R} ${DIM}HovQ...Zh2J${R}   ${LIME}SOL${R} ${DIM}J83w...Vkix${R}   ${PURPLE}ETH${R} ${DIM}EdVC...1Vw${R}`);
     blank();
@@ -662,15 +795,15 @@ async function main() {
   console.log(`    ${GRN}${B}══════ Security ══════${R}`);
   blank();
   const secItems: [string, string, string][] = [
-    ["Audits       ", "4 rounds",                                    GRN],
-    ["Bugs Fixed   ", "55 found, 55 fixed, 0 remaining",            GRN],
+    ["Audits       ", "6 rounds",                                    GRN],
+    ["Bugs Fixed   ", "93 found, 93 fixed, 0 remaining",            GRN],
     ["Hashing      ", "SHA-256 (no custom crypto)",                  TEAL],
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
     ["Rent Recovery", "9 close instructions for settled accounts",   BLU],
-    ["Test Suite   ", "69 passing",                                  LIME],
+    ["Test Suite   ", "80 passing (69 SDK + 11 on-chain)",                                  LIME],
     ["SDK Coverage ", "100% (42+ instructions)",                     GOLD],
-    ["VRF Support  ", "All 4 games (Switchboard)",                   ORANGE],
+    ["VRF Support  ", "VRF-only — all games use Switchboard",                   ORANGE],
   ];
   for (const [label, value, color] of secItems) {
     console.log(`    ${color}${B}✓${R} ${DIM}${label}${R}  ${color}${B}${value}${R}`);
@@ -686,7 +819,7 @@ async function main() {
     "║   GitHub:  github.com/Romulus-Sol/agent-casino               ║",
     "║   Program: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV    ║",
     "║                                                              ║",
-    "║     4 audits  |  55 bugs fixed  |  69 tests  |  0 remaining ║",
+    "║     6 audits  |  93 bugs fixed  |  80 tests  |  0 remaining ║",
     "║                                                              ║",
     "║        Built by Claude  🤖  100% AI-authored code            ║",
     "║      Colosseum Agent Hackathon  |  February 2026             ║",

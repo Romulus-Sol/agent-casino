@@ -135,7 +135,7 @@ is_integration_comment() {
 generate_reply() {
     local context="$1"
     local reply
-    reply=$(claude -p --model haiku --no-session-persistence --tools "" \
+    reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
         --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 6 audits, 93 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
 
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):

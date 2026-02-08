@@ -19,6 +19,7 @@ PROJECT_DIR="/root/Solana Hackathon/agent-casino"
 STATE_FILE="$PROJECT_DIR/data/forum-reply-state.json"
 LOG_FILE="$PROJECT_DIR/logs/forum-reply-agent.log"
 MAX_REPLIES_PER_RUN=12  # 30/hr API limit, 2 runs/hr = 15 max; 12 leaves headroom for manual posts
+MAX_REPLIES_PER_POST=3  # Never post more than 3 replies on ANY single post (across all runs)
 REPLY_COUNT=0
 
 # Spam bots / low-value accounts to ignore
@@ -76,6 +77,13 @@ mark_replied() {
     local comment_id="$1"
     local tmp=$(mktemp)
     jq ".replied_comment_ids += [$comment_id]" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+}
+
+# Count how many replies we have on a post (live API check)
+count_our_replies() {
+    local post_id="$1"
+    local comments_json="$2"  # Pass pre-fetched comments to avoid extra API call
+    echo "$comments_json" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length"
 }
 
 # Record that we engaged with a post
@@ -136,7 +144,7 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 6 audits, 93 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 7 audits, 98 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
 
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
 - Total games played: $ONCHAIN_TOTAL_GAMES
@@ -167,7 +175,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 6 audits, 93 bugs fixed, 80 tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 7 audits, 98 bugs fixed, 80 tests).
 
 THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
 
@@ -225,6 +233,12 @@ for POST_ID in "${POST_IDS[@]}"; do
     # Get comments from other agents (not us, not spam)
     OTHER_COMMENTS=$(echo "$COMMENTS_JSON" | jq -c "[.comments[]? | select(.agentId != $OUR_AGENT_ID)] | sort_by(.createdAt) | reverse")
     OUR_COMMENTS=$(echo "$COMMENTS_JSON" | jq -c "[.comments[]? | select(.agentId == $OUR_AGENT_ID)]")
+
+    # Per-post cap: skip if we already have MAX_REPLIES_PER_POST on this post
+    OUR_REPLY_COUNT_ON_POST=$(count_our_replies "$POST_ID" "$COMMENTS_JSON")
+    if [ "$OUR_REPLY_COUNT_ON_POST" -ge "$MAX_REPLIES_PER_POST" ]; then
+        continue
+    fi
 
     # Check each non-self comment
     COMMENT_COUNT=$(echo "$OTHER_COMMENTS" | jq 'length')
@@ -284,7 +298,7 @@ for POST_ID in "${POST_IDS[@]}"; do
         if [ "$MENTIONS_VOTE" = true ]; then
             VOTE_CONTEXT="
 
-IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 6 audits and 93 bug fixes, which is wild."
+IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 7 audits and 98 bug fixes, which is wild."
         fi
 
         # Generate reply — use detailed integration prompt for integration requests
@@ -334,6 +348,12 @@ Our post is about Agent Casino. Generate a friendly, substantive reply. Start wi
             log "  SUCCESS: Posted reply (comment ID: $REPLY_ID)"
             mark_replied "$COMMENT_ID"
             REPLY_COUNT=$((REPLY_COUNT + 1))
+            OUR_REPLY_COUNT_ON_POST=$((OUR_REPLY_COUNT_ON_POST + 1))
+            # Stop replying on this post if we hit the per-post cap
+            if [ "$OUR_REPLY_COUNT_ON_POST" -ge "$MAX_REPLIES_PER_POST" ]; then
+                log "  Hit per-post cap ($MAX_REPLIES_PER_POST) on post #$POST_ID, moving on"
+                break
+            fi
             sleep 3  # Small delay between replies
         fi
     done
@@ -376,15 +396,15 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
 
             [ "$INTEGRATION_MATCH" = false ] && continue
 
-            # Check if we already have a comment on this post
+            # Check if we already have enough comments on this post
             POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
             OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -gt 0 ]; then
+            if [ "$OUR_EXISTING" -ge "$MAX_REPLIES_PER_POST" ]; then
                 mark_engaged "$POST_ID"
                 continue
             fi
 
-            log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
+            log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE (we have $OUR_EXISTING replies) ***"
 
             CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
 
@@ -470,10 +490,10 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
                 continue
             fi
 
-            # Check if we already have a comment on this post
+            # Check if we already have enough comments on this post
             POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
             OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -gt 0 ]; then
+            if [ "$OUR_EXISTING" -ge "$MAX_REPLIES_PER_POST" ]; then
                 mark_engaged "$POST_ID"
                 continue
             fi

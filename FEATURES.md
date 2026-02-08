@@ -6,7 +6,7 @@ Complete documentation for all Agent Casino features. For a quick overview, see 
 
 ## House Games
 
-Classic casino games with provably fair randomness.
+Classic casino games with **Switchboard VRF** (Verifiable Random Function) — the only randomness path. Non-VRF instructions have been removed entirely. The SDK handles the 2-step request→settle flow automatically with retry.
 
 ### Coin Flip
 50/50 odds, ~2x payout (minus 1% house edge)
@@ -471,13 +471,13 @@ npm run start:server  # Starts on port 3402
 
 ```typescript
 class AgentCasino {
-  // House Games
+  // House Games (VRF-backed — SDK handles request→settle automatically with retry)
   coinFlip(amount, choice): Promise<GameResult>
   diceRoll(amount, target): Promise<GameResult>
   limbo(amount, multiplier): Promise<GameResult>
   crash(amount, multiplier): Promise<GameResult>
 
-  // VRF Games (Switchboard Randomness — 2-step request/settle)
+  // Low-level VRF methods (if you need manual control over the 2-step flow)
   vrfCoinFlipRequest(amountSol, choice, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
   vrfCoinFlipSettle(vrfRequestAddress, randomnessAccount): Promise<GameResult>
   vrfDiceRollRequest(amountSol, target, randomnessAccount): Promise<{txSignature, vrfRequestAddress}>
@@ -604,6 +604,7 @@ class HitmanMarket {
 - [x] Security audit #4: 5 breaking-change fixes (init_if_needed, close constraints, SHA-256, integer math, safe unwrap)
 - [x] Security audit #5: 30 fixes (deep arithmetic, liquidity checks, LP withdrawal, VRF expiry refunds)
 - [x] Security audit #6: 8 fixes (VRF-only, on-chain tests, race condition fix, arbiter payouts)
+- [x] Security audit #7: 5 fixes (VRF demo verified on-chain with full TX IDs, updated docs/stats)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
 - [x] 100% SDK instruction coverage (44+ instructions)
-- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 93 vulnerabilities fixed, 0 remaining)
+- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 98 vulnerabilities fixed, 0 remaining)

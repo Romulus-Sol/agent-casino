@@ -19,7 +19,6 @@ PROJECT_DIR="/root/Solana Hackathon/agent-casino"
 STATE_FILE="$PROJECT_DIR/data/forum-reply-state.json"
 LOG_FILE="$PROJECT_DIR/logs/forum-reply-agent.log"
 MAX_REPLIES_PER_RUN=12  # 30/hr API limit, 2 runs/hr = 15 max; 12 leaves headroom for manual posts
-MAX_REPLIES_PER_POST=3  # Never post more than 3 replies on ANY single post (across all runs)
 REPLY_COUNT=0
 
 # Spam bots / low-value accounts to ignore
@@ -77,13 +76,6 @@ mark_replied() {
     local comment_id="$1"
     local tmp=$(mktemp)
     jq ".replied_comment_ids += [$comment_id]" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
-}
-
-# Count how many replies we have on a post (live API check)
-count_our_replies() {
-    local post_id="$1"
-    local comments_json="$2"  # Pass pre-fetched comments to avoid extra API call
-    echo "$comments_json" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length"
 }
 
 # Record that we engaged with a post
@@ -234,12 +226,6 @@ for POST_ID in "${POST_IDS[@]}"; do
     OTHER_COMMENTS=$(echo "$COMMENTS_JSON" | jq -c "[.comments[]? | select(.agentId != $OUR_AGENT_ID)] | sort_by(.createdAt) | reverse")
     OUR_COMMENTS=$(echo "$COMMENTS_JSON" | jq -c "[.comments[]? | select(.agentId == $OUR_AGENT_ID)]")
 
-    # Per-post cap: skip if we already have MAX_REPLIES_PER_POST on this post
-    OUR_REPLY_COUNT_ON_POST=$(count_our_replies "$POST_ID" "$COMMENTS_JSON")
-    if [ "$OUR_REPLY_COUNT_ON_POST" -ge "$MAX_REPLIES_PER_POST" ]; then
-        continue
-    fi
-
     # Check each non-self comment
     COMMENT_COUNT=$(echo "$OTHER_COMMENTS" | jq 'length')
     for i in $(seq 0 $(( COMMENT_COUNT - 1 ))); do
@@ -260,8 +246,10 @@ for POST_ID in "${POST_IDS[@]}"; do
             continue
         fi
 
-        # Skip if we already have a reply starting with @AgentName on this post
-        ALREADY_REPLIED_TO_AGENT=$(echo "$OUR_COMMENTS" | jq -r ".[].body // empty" | grep -ci "^@${AGENT_NAME}" 2>/dev/null || true)
+        # Skip if we already have a reply mentioning @AgentName on this post (robust jq check)
+        AGENT_NAME_LOWER=$(echo "$AGENT_NAME" | tr '[:upper:]' '[:lower:]')
+        ALREADY_REPLIED_TO_AGENT=$(echo "$OUR_COMMENTS" | jq --arg name "$AGENT_NAME_LOWER" \
+            '[.[] | select((.body // "" | ascii_downcase | startswith("@" + $name)) or (.body // "" | ascii_downcase | contains("@" + $name + " ")) or (.body // "" | ascii_downcase | contains("@" + $name + " --")))] | length')
         ALREADY_REPLIED_TO_AGENT=${ALREADY_REPLIED_TO_AGENT:-0}
         if [ "$ALREADY_REPLIED_TO_AGENT" -gt 0 ]; then
             mark_replied "$COMMENT_ID"
@@ -348,12 +336,6 @@ Our post is about Agent Casino. Generate a friendly, substantive reply. Start wi
             log "  SUCCESS: Posted reply (comment ID: $REPLY_ID)"
             mark_replied "$COMMENT_ID"
             REPLY_COUNT=$((REPLY_COUNT + 1))
-            OUR_REPLY_COUNT_ON_POST=$((OUR_REPLY_COUNT_ON_POST + 1))
-            # Stop replying on this post if we hit the per-post cap
-            if [ "$OUR_REPLY_COUNT_ON_POST" -ge "$MAX_REPLIES_PER_POST" ]; then
-                log "  Hit per-post cap ($MAX_REPLIES_PER_POST) on post #$POST_ID, moving on"
-                break
-            fi
             sleep 3  # Small delay between replies
         fi
     done
@@ -396,15 +378,15 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
 
             [ "$INTEGRATION_MATCH" = false ] && continue
 
-            # Check if we already have enough comments on this post
+            # Check if we already have a comment on this post
             POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
             OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -ge "$MAX_REPLIES_PER_POST" ]; then
+            if [ "$OUR_EXISTING" -gt 0 ]; then
                 mark_engaged "$POST_ID"
                 continue
             fi
 
-            log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE (we have $OUR_EXISTING replies) ***"
+            log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
 
             CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
 
@@ -490,10 +472,10 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
                 continue
             fi
 
-            # Check if we already have enough comments on this post
+            # Check if we already have a comment on this post
             POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
             OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -ge "$MAX_REPLIES_PER_POST" ]; then
+            if [ "$OUR_EXISTING" -gt 0 ]; then
                 mark_engaged "$POST_ID"
                 continue
             fi

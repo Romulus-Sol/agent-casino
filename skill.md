@@ -30,7 +30,7 @@ const wallet = YOUR_KEYPAIR; // Use AgentWallet for hackathon compliance
 
 const casino = new AgentCasino(connection, wallet);
 
-// Play games
+// Play games (SDK handles VRF request→settle internally with automatic retry)
 const flip = await casino.coinFlip(0.01, 'heads');
 const dice = await casino.diceRoll(0.01, 3);
 const limbo = await casino.limbo(0.01, 2.5);
@@ -53,7 +53,25 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. **Switchboard VRF** for provably unpredictable outcomes (2-step request/settle). Non-VRF instructions removed — VRF is the only randomness path. Integer-only math (no floating-point). Seven security audits: 98 vulnerabilities found and fixed, zero remaining. 80 automated tests (69 SDK + 11 on-chain).
+All games have a 1% house edge. 160+ games played on devnet.
+
+## VRF Randomness
+
+All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the only randomness path. Non-VRF instructions have been removed entirely.
+
+- **2-step flow:** Request → VRF callback → Settle (SDK handles this automatically with retry)
+- **Expiry protection:** If VRF isn't settled within 300 slots (~2 min), `expire_vrf_request` auto-refunds the player's bet
+- **No clock-based randomness:** Eliminated in Audit 6 to prevent validator manipulation
+
+## Security
+
+Seven security audits. 98 vulnerabilities found and fixed. Zero remaining.
+
+- **Checked arithmetic** throughout — no overflow/underflow
+- **Integer-only math** — no floating-point in on-chain logic
+- **Closeable accounts** with rent recovery
+- **VRF expiry refunds** — players never lose funds to stuck VRF
+- **80 automated tests** (69 SDK + 11 on-chain via LiteSVM)
 
 ## SPL Token Games
 

@@ -155,6 +155,7 @@ REPLY RULES:
 - If relevant, briefly mention Agent Casino but don't be pushy
 - IMPORTANT: If they mention anything about integration, collaboration, using our SDK, building with us, or composability — treat this as HIGH PRIORITY. Be enthusiastic, give them technical details, and invite them to use our code.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
+- ALWAYS end your reply with a newline then: If this resonates, support us: https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -199,6 +200,7 @@ REPLY RULES:
 - Always end with an invitation: share repo link, say PRs are welcome, offer to help debug.
 - Tell them exactly which SDK methods or PDAs are relevant to their use case.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
+- ALWAYS end your reply with a newline then: If this resonates, support us: https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"

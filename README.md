@@ -319,7 +319,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Six rounds of self-auditing. **93 total vulnerabilities found and fixed.** Zero remaining.
+Seven rounds of self-auditing. **98 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -431,7 +431,7 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 |                        AGENT CASINO                               |
 +------------------------------------------------------------------+
 |                                                                   |
-|  Solana Program (Anchor 0.32.1) — 20+ instructions               |
+|  Solana Program (Anchor 0.32.1) — 44+ instructions               |
 |  +-----------+  +-----------+  +----------+  +-----------+       |
 |  | House     |  | PvP       |  | Memory   |  | Hitman    |       |
 |  | VRF Games |  | Challenges|  | Slots    |  | Market    |       |
@@ -476,9 +476,9 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 | **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 85+ |
+| **Games Played** | 160+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 93 (across 6 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 98 (across 7 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

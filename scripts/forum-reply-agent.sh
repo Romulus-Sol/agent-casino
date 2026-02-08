@@ -97,6 +97,33 @@ PROJECT_HUMAN_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.humanUpvotes 
 PROJECT_AGENT_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.agentUpvotes // 0')
 PROJECT_TOTAL_VOTES=$((PROJECT_HUMAN_VOTES + PROJECT_AGENT_VOTES))
 
+# Fetch LIVE on-chain stats from devnet (cached per run)
+HOUSE_PDA="5bpQpcnZ8siBx2zuW1Ae5MbSFj4PdLUUvrsqTNqh9NRw"
+ONCHAIN_STATS=$(python3 -c "
+import json, base64, struct, urllib.request
+try:
+    req = urllib.request.Request('https://api.devnet.solana.com',
+        data=json.dumps({'jsonrpc':'2.0','id':1,'method':'getAccountInfo',
+            'params':['$HOUSE_PDA',{'encoding':'base64'}]}).encode(),
+        headers={'Content-Type':'application/json'})
+    resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    data = base64.b64decode(resp['result']['value']['data'][0])
+    pool = struct.unpack_from('<Q', data, 40)[0]
+    total_games = struct.unpack_from('<Q', data, 59)[0]
+    total_volume = struct.unpack_from('<Q', data, 67)[0]
+    total_payout = struct.unpack_from('<Q', data, 75)[0]
+    print(json.dumps({'total_games':total_games,'pool_sol':round(pool/1e9,4),
+        'volume_sol':round(total_volume/1e9,4),'payout_sol':round(total_payout/1e9,4)}))
+except Exception as e:
+    print(json.dumps({'total_games':0,'pool_sol':0,'volume_sol':0,'payout_sol':0,'error':str(e)}))
+" 2>/dev/null || echo '{"total_games":0,"pool_sol":0,"volume_sol":0,"payout_sol":0}')
+
+ONCHAIN_TOTAL_GAMES=$(echo "$ONCHAIN_STATS" | jq -r '.total_games')
+ONCHAIN_POOL_SOL=$(echo "$ONCHAIN_STATS" | jq -r '.pool_sol')
+ONCHAIN_VOLUME_SOL=$(echo "$ONCHAIN_STATS" | jq -r '.volume_sol')
+ONCHAIN_PAYOUT_SOL=$(echo "$ONCHAIN_STATS" | jq -r '.payout_sol')
+log "On-chain stats: $ONCHAIN_TOTAL_GAMES games, ${ONCHAIN_POOL_SOL} SOL pool, ${ONCHAIN_VOLUME_SOL} SOL volume"
+
 # Generate a reply using Claude CLI
 # Check if a comment is about integration/collaboration
 is_integration_comment() {
@@ -111,6 +138,13 @@ generate_reply() {
     reply=$(claude -p --model haiku --no-session-persistence --tools "" \
         --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 6 audits, 93 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
 
+LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
+- Total games played: $ONCHAIN_TOTAL_GAMES
+- Pool size: $ONCHAIN_POOL_SOL SOL
+- Total volume: $ONCHAIN_VOLUME_SOL SOL
+- Total payout: $ONCHAIN_PAYOUT_SOL SOL
+- Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
+
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
 REPLY RULES:
@@ -120,6 +154,7 @@ REPLY RULES:
 - If they asked a question, answer it specifically
 - If relevant, briefly mention Agent Casino but don't be pushy
 - IMPORTANT: If they mention anything about integration, collaboration, using our SDK, building with us, or composability — treat this as HIGH PRIORITY. Be enthusiastic, give them technical details, and invite them to use our code.
+- When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -136,6 +171,12 @@ generate_integration_reply() {
 THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary. Just the reply exactly as it should be posted.
+
+LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
+- Total games played: $ONCHAIN_TOTAL_GAMES
+- Pool size: $ONCHAIN_POOL_SOL SOL
+- Total volume: $ONCHAIN_VOLUME_SOL SOL
+- Total payout: $ONCHAIN_PAYOUT_SOL SOL
 
 TECHNICAL DETAILS TO INCLUDE (pick what's relevant to their request):
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
@@ -157,6 +198,7 @@ REPLY RULES:
 - Suggest a concrete integration path based on what they described.
 - Always end with an invitation: share repo link, say PRs are welcome, offer to help debug.
 - Tell them exactly which SDK methods or PDAs are relevant to their use case.
+- When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"

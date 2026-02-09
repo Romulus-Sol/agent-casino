@@ -411,7 +411,7 @@ All 8 previously accepted-risk items resolved:
 ### Test Suite
 
 80 automated tests covering (69 SDK + 11 on-chain):
-- PDA derivation — house, vault, game records, agent stats, LP, memory, tokens (8 tests)
+- PDA derivation — house, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
 - Provably fair verification with statistical distribution checks (6 tests)
@@ -533,9 +533,9 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **Program ID** | `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV` |
 | **Network** | Solana Devnet |
 | **Framework** | Anchor 0.32.1 |
-| **House Pool** | ~5 SOL |
+| **House Pool** | ~10 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 173+ |
+| **Games Played** | 188+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
 | **Vulnerabilities Fixed** | 125 (across 9 audits, 0 remaining) |
 

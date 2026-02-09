@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. 173+ games played on devnet.
+All games have a 1% house edge. 188+ games played on devnet.
 
 ## VRF Randomness
 
@@ -294,7 +294,7 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 
 - **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 - **Network:** Solana Devnet
-- **House Pool:** ~5 SOL, 1% edge
+- **House Pool:** ~10 SOL, 1% edge
 - **Framework:** Anchor 0.32.1
 
 ### PDA Seeds

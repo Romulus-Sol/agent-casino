@@ -442,7 +442,7 @@ await casino.refundLotteryTicket(lotteryAddress, ticketNumber, buyerAddress);
 ### Security
 - Prize calculated and stored at draw time (no recalculation at claim)
 - Creator-only draw prevents choose-your-randomness attacks
-- Rejection sampling for unbiased winner selection
+- 8-byte VRF randomness (u64) for negligible modular bias in winner selection
 - Pool accounting synced with house.pool on every operation
 - Ticket accounts close after claim/refund (rent recovery)
 
@@ -689,6 +689,8 @@ class HitmanMarket {
 - [x] Security audit #5: 30 fixes (deep arithmetic, liquidity checks, LP withdrawal, VRF expiry refunds)
 - [x] Security audit #6: 8 fixes (VRF-only, on-chain tests, race condition fix, arbiter payouts)
 - [x] Security audit #7: 5 fixes (VRF demo verified on-chain with full TX IDs, updated docs/stats)
+- [x] Security audit #8: 15 fixes (lottery pool accounting, cancel/refund flow, creator-only draw, rejection sampling)
+- [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (65 on-chain, core game/feature methods in SDK)
 - [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 125 vulnerabilities fixed across 9 audits, 0 remaining)

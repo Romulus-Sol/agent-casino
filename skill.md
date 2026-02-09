@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. 170+ games played on devnet.
+All games have a 1% house edge. 173+ games played on devnet.
 
 ## VRF Randomness
 
@@ -65,7 +65,7 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Seven security audits. 98 vulnerabilities found and fixed. Zero remaining.
+Eight security audits. 113 vulnerabilities found and fixed. Zero remaining.
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic
@@ -192,6 +192,33 @@ await casino.submitProof(hitIndex, "Found overflow in line 234, here's the PoC..
 await casino.arbitrateHit(hitIndex, true); // true = approve payout
 ```
 
+## Lottery Pool
+
+On-chain lottery with Switchboard VRF-drawn winners. Full cancel/refund flow.
+
+```typescript
+// Create lottery (0.01 SOL per ticket, 10 max, ends at slot)
+const lottery = await casino.createLottery(0.01, 10, endSlot);
+
+// Buy ticket
+await casino.buyLotteryTicket(lottery.lotteryAddress);
+
+// Draw winner (creator only, uses Switchboard VRF)
+await casino.drawLotteryWinner(lottery.lotteryAddress, randomnessAccount);
+
+// Claim prize
+await casino.claimLotteryPrize(lottery.lotteryAddress, ticketNumber);
+
+// View info
+const info = await casino.getLotteryInfo(lottery.lotteryAddress);
+
+// Cancel (if draw didn't happen after grace period)
+await casino.cancelLottery(lottery.lotteryAddress);
+
+// Refund ticket from cancelled lottery
+await casino.refundLotteryTicket(lottery.lotteryAddress, ticketNumber, buyerAddress);
+```
+
 ## Liquidity Provider System
 
 Earn proportional house edge from every game played. LP positions are tracked on-chain.
@@ -255,6 +282,13 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | `memory-pull.ts <addr>` | Pull random memory |
 | `memory-rate.ts <addr> <1-5>` | Rate a memory |
 | `memory-view-pool.ts --memories` | View memory pool |
+| `lottery-create.ts <price> <max> <slots>` | Create lottery |
+| `lottery-buy.ts <addr>` | Buy lottery ticket |
+| `lottery-draw.ts <addr>` | Draw winner (VRF) |
+| `lottery-claim.ts <addr> <ticket>` | Claim prize |
+| `lottery-view.ts <addr>` | View lottery info |
+| `auto-play.ts [N]` | Play N random VRF games |
+| `tournament.ts [players] [rounds] [bet]` | Run tournament |
 
 ## Program Info
 
@@ -280,6 +314,8 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | Hit | `["hit", hit_pool, index]` |
 | Arbitration | `["arbitration", hit]` |
 | VrfRequest | `["vrf_request", house, game_index]` |
+| Lottery | `["lottery", house, lottery_index_le_bytes]` |
+| LotteryTicket | `["ticket", lottery, ticket_number_le_bytes]` |
 | TokenVault | `["token_vault", mint]` |
 | TokenGame | `["token_game", token_vault, game_index]` |
 

@@ -321,7 +321,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Seven rounds of self-auditing. **98 total vulnerabilities found and fixed.** Zero remaining.
+Eight rounds of self-auditing. **113 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -378,6 +378,20 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 - `remove_liquidity` — LP providers can now withdraw funds
 - `expire_vrf_request` — refunds player if VRF not settled within 300 slots
 
+### Audit 8: Lottery Security (15 vulnerabilities)
+- **C1:** Pool accounting desync — house.pool now updated on every buy/draw/claim/refund
+- **C2:** Unchecked prize deduction — explicit lamport check before transfer
+- **H1:** No cancel/refund — 3 new instructions: cancel_lottery, refund_lottery_ticket, close_lottery_ticket
+- **H2:** Modular bias — rejection sampling with 8-byte randomness for winner selection
+- **H3:** Choose-your-randomness — draw restricted to lottery creator only
+- **M1-M4:** Stored prize at draw time (immutable), ticket close for rent recovery, minimum duration, house constraint
+- **L1-L4:** Winner sentinel value, AgentStats tracking, explicit constraints
+
+### Audit 7: VRF Demo Verification (5 vulnerabilities)
+- Demo recording with real VRF transactions, full TX IDs for judges
+- Switchboard SDK error suppression during polling
+- Updated all stale stats and Anchor version references
+
 ### Audit 6: VRF-Only + On-Chain Tests (8 fixes — closing all accepted risks)
 All 8 previously accepted-risk items resolved:
 - **Non-VRF instructions removed** — coin_flip, dice_roll, limbo, crash, token_coin_flip all deleted. VRF is the only randomness path. PvP challenges retain clock-based seeds (acceptable for 2-player games).
@@ -415,6 +429,41 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 
 ---
 
+## Lottery Pool
+
+On-chain lottery with Switchboard VRF-drawn winners. Full cancel/refund flow for stuck lotteries.
+
+```typescript
+const casino = new AgentCasino(connection, wallet);
+const lottery = await casino.createLottery(0.01, 10, endSlot);
+await casino.buyLotteryTicket(lottery.lotteryAddress);
+// after end_slot:
+await casino.drawLotteryWinner(lottery.lotteryAddress, randomnessAccount);
+await casino.claimLotteryPrize(lottery.lotteryAddress, winningTicket);
+```
+
+```bash
+npx ts-node scripts/lottery-create.ts 0.01 10 1000
+npx ts-node scripts/lottery-buy.ts <LOTTERY_ADDRESS>
+npx ts-node scripts/lottery-draw.ts <LOTTERY_ADDRESS>
+npx ts-node scripts/lottery-claim.ts <LOTTERY_ADDRESS> <TICKET_NUMBER>
+npx ts-node scripts/lottery-view.ts <LOTTERY_ADDRESS>
+```
+
+---
+
+## Auto-Play Bot & Tournament
+
+```bash
+# Auto-play: N random VRF games across all 4 types
+npx ts-node scripts/auto-play.ts 10
+
+# Tournament: multi-round elimination
+npx ts-node scripts/tournament.ts 8 3 0.001
+```
+
+---
+
 ## Example Agents
 
 | Example | Strategy | Run |
@@ -433,7 +482,7 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 |                        AGENT CASINO                               |
 +------------------------------------------------------------------+
 |                                                                   |
-|  Solana Program (Anchor 0.32.1) — 44+ instructions               |
+|  Solana Program (Anchor 0.32.1) — 65 instructions                 |
 |  +-----------+  +-----------+  +----------+  +-----------+       |
 |  | House     |  | PvP       |  | Memory   |  | Hitman    |       |
 |  | VRF Games |  | Challenges|  | Slots    |  | Market    |       |
@@ -478,9 +527,9 @@ SBF_OUT_DIR=target/deploy cargo test --package agent-casino --test litesvm_tests
 | **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~5 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 170+ |
+| **Games Played** | 173+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 98 (across 7 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 113 (across 8 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 

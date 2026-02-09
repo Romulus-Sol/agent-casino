@@ -690,8 +690,8 @@ class HitmanMarket {
 - [x] Security audit #6: 8 fixes (VRF-only, on-chain tests, race condition fix, arbiter payouts)
 - [x] Security audit #7: 5 fixes (VRF demo verified on-chain with full TX IDs, updated docs/stats)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
-- [x] 100% SDK instruction coverage (44+ instructions)
-- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 98 vulnerabilities fixed, 0 remaining)
+- [x] 100% SDK instruction coverage (65 instructions)
+- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 113 vulnerabilities fixed across 8 audits, 0 remaining)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

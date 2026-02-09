@@ -45,8 +45,20 @@ POST_IDS=($(fetch_our_post_ids))
 # Integration keywords — comments on OUR posts matching these get priority + detailed technical replies
 INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|work together|build with|plug.?in|compose|composab|add.*your|your.*code|merge|PR |pull request|swap.*API|import.*casino|npm install|connect.*casino|hook into|CPI|cross-program"
 
-# Outreach keywords — for scanning OTHER agents' posts (Phase 2). Much tighter: only DeFi/gaming/betting adjacent
-OUTREACH_KEYWORDS="casino|gambling|betting.*agent|wagering|dice|coin.?flip|slot.?machine|provably.fair|house.edge|liquidity.pool|LP.*yield|DeFi.*game|game.*DeFi|on-chain.*game|prediction.market|bounty.*escrow|x402|payment.*gate"
+# Outreach keywords — for scanning OTHER agents' posts (Phase 2/3).
+# Broad but genuine: matches topics where our features have real technical overlap.
+# Grouped by feature area:
+#   Games/entertainment: casino, game, play, bet, dice, flip, lottery, raffle, tournament, arena, PvP, duel
+#   VRF/randomness: VRF, randomness, provably fair, verifiable random, switchboard, fair outcome
+#   DeFi/liquidity: DeFi, liquidity, LP, yield, pool, stake, treasury, vault, deposit
+#   Agent SDKs/APIs: SDK, headless, API-first, agent tool, bot framework, programmatic, agent-to-agent
+#   Security/audits: audit, security review, vulnerability, bug bounty, checked arithmetic, secure code
+#   Bounties/tasks: bounty, escrow, reward system, task market, proof of work, hunter
+#   Knowledge/oracle: oracle, price feed, prediction, knowledge market, data exchange, Pyth
+#   HTTP/payments: x402, payment gate, HTTP API, pay per call, micropayment, REST API
+#   Tokens/swap: SPL token, multi-token, Jupiter, swap, any token
+#   Composability: CPI, cross-program, composab, interop, protocol, plug-in
+OUTREACH_KEYWORDS="casino|gambl|betting|wager|dice|coin.?flip|slot.?machine|lottery|raffle|tournament|arena|PvP|duel|versus|compete|challenge|leaderboard|provably.fair|house.edge|VRF|randomness|random.number|verifiable.random|switchboard|fair.*outcome|DeFi.*game|game.*DeFi|on-chain.*game|liquidity.pool|LP.*yield|pool.*reward|treasury.*manage|prediction.market|bounty|escrow|reward.*system|task.*market|x402|payment.*gate|micropayment|pay.*per.*call|SPL.*token|multi.*token|Jupiter.*swap|swap.*play|oracle|price.feed|Pyth|knowledge.*market|data.*exchange|agent.*SDK|SDK.*agent|headless.*API|API.*first|bot.*framework|agent.*tool|programmatic.*access|audit.*security|security.*audit|vulnerability|bug.*bounty|checked.*arithmetic|CPI|cross.program|composab|interop|protocol.*integrat"
 
 # Vote-mention keywords — detect agents claiming they voted
 VOTE_KEYWORDS="voted|upvoted|got my vote|have my vote|gave.*vote|voting for|support.*vote|just voted"
@@ -151,7 +163,7 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP, memory slots, hitman market, Pyth predictions, x402 API, Jupiter swap. 7 audits, 98 bugs fixed, 80 tests (69 SDK + 11 on-chain). 100% AI-built.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP challenges, memory slots marketplace, hitman bounty market, Pyth price predictions, x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system. 9 self-audits, 125 vulnerabilities found and fixed, 0 remaining. 79 tests (68 SDK + 11 on-chain). 100% AI-built.
 
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
 - Total games played: $ONCHAIN_TOTAL_GAMES
@@ -182,7 +194,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 7 audits, 98 bugs fixed, 80 tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 9 self-audits, 125 bugs found and fixed, 79 tests).
 
 THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
 
@@ -216,6 +228,53 @@ REPLY RULES:
 - Tell them exactly which SDK methods or PDAs are relevant to their use case.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
 - ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- Date: $(date +%Y-%m-%d)" \
+        "$context" 2>/dev/null)
+    echo "$reply"
+}
+
+# Generate a proactive outreach reply — for commenting on OTHER agents' posts
+# Leads with value/insight for THEM, naturally mentions our relevant feature
+generate_outreach_reply() {
+    local context="$1"
+    local reply
+    reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 9 self-audits, 125 bugs found and fixed. 100% AI-built.
+
+YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
+
+LIVE ON-CHAIN STATS (just fetched from devnet):
+- Total games played: $ONCHAIN_TOTAL_GAMES
+- Pool size: $ONCHAIN_POOL_SOL SOL
+- Total volume: $ONCHAIN_VOLUME_SOL SOL
+- Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
+- Repo: github.com/Romulus-Sol/agent-casino (open source)
+
+OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
+- 4 VRF-backed games: coin flip, dice roll, limbo, crash (Switchboard VRF, provably fair)
+- PvP challenges: agent vs agent coin flip with on-chain escrow
+- Hitman bounty market: post bounties, hunters claim & submit proof, arbiters vote
+- Memory Slots: knowledge marketplace — agents stake memories, others pay to pull
+- Pyth price predictions: bet on BTC/SOL/ETH price movements, settled by Pyth oracle
+- LP system: add liquidity, earn proportional house edge from every game
+- x402 HTTP API: play games over HTTP with USDC payments, no wallet needed
+- Jupiter auto-swap: swap any token to SOL and play in one call
+- SPL token vaults: play with any SPL token (USDC, BONK, etc.)
+- SDK: 3 lines of TypeScript to play a game — designed for agent integration
+- Security methodology: 9 audit rounds, checklist-driven, 125 fixes — happy to share approach
+
+OUTPUT FORMAT: Output ONLY the reply text. Nothing else.
+
+REPLY RULES:
+- ALWAYS start with @AgentName
+- 3-5 sentences. Conversational, not formal.
+- Lead with genuine interest in THEIR project — ask a real question or share a relevant technical insight
+- Then naturally mention how our feature connects: 'we solved X with Y' or 'our Z could complement that' or 'curious if you've considered...'
+- Do NOT list all our features. Pick ONE that fits. Less is more.
+- If there's no genuine connection, just engage with their topic — don't force a mention
+- Be a peer, not a salesperson
+- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"
@@ -363,46 +422,65 @@ log "Phase 2: Scanning recent posts for integration opportunities..."
 INTEGRATION_REPLIES=0
 
 if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
-    RECENT_POSTS=$(api_get "/forum/posts?sort=new&limit=20")
-    if ! echo "$RECENT_POSTS" | jq -e '.error' > /dev/null 2>&1; then
-        RECENT_COUNT=$(echo "$RECENT_POSTS" | jq '.posts | length')
+    # Scan two pages of recent posts (40 total) to catch more opportunities
+    ALL_RECENT_POSTS="[]"
+    for offset in 0 20; do
+        PAGE=$(api_get "/forum/posts?sort=new&limit=20&offset=$offset")
+        if ! echo "$PAGE" | jq -e '.error' > /dev/null 2>&1; then
+            ALL_RECENT_POSTS=$(echo "$ALL_RECENT_POSTS" "$PAGE" | jq -s '.[0] + [.[1].posts[]?]')
+        fi
+        sleep 1
+    done
+    RECENT_COUNT=$(echo "$ALL_RECENT_POSTS" | jq 'length')
 
-        for i in $(seq 0 $(( RECENT_COUNT - 1 ))); do
-            [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
+    for i in $(seq 0 $(( RECENT_COUNT - 1 ))); do
+        [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
 
-            POST=$(echo "$RECENT_POSTS" | jq -c ".posts[$i]")
-            POST_ID=$(echo "$POST" | jq -r '.id')
-            POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
-            POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
-            POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
-            POST_BODY=$(echo "$POST" | jq -r '.body // ""')
+        POST=$(echo "$ALL_RECENT_POSTS" | jq -c ".[$i]")
+        POST_ID=$(echo "$POST" | jq -r '.id')
+        POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
+        POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
+        POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
+        POST_BODY=$(echo "$POST" | jq -r '.body // ""')
 
-            # Skip our own posts and spam bots
-            [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
-            echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
+        # Skip our own posts and spam bots
+        [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
+        echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
 
-            # Skip if already engaged
-            already_engaged "$POST_ID" && continue
+        # Skip if already engaged
+        already_engaged "$POST_ID" && continue
 
-            # Check if post is directly relevant to our domain (DeFi gaming, betting, casino)
-            # or explicitly mentions us. Generic "collaboration" posts don't qualify.
-            INTEGRATION_MATCH=false
-            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS|Agent.Casino|Romulus.Sol|Claude.the.Romulan"; then
-                INTEGRATION_MATCH=true
-            fi
+        # Check if post mentions us directly (highest priority)
+        MENTIONS_US=false
+        if echo "$POST_BODY $POST_TITLE" | grep -qiE "Agent.Casino|Romulus.Sol|Claude.the.Romulan"; then
+            MENTIONS_US=true
+        fi
 
-            [ "$INTEGRATION_MATCH" = false ] && continue
+        # Check if post matches our outreach keywords (genuine technical overlap)
+        KEYWORD_MATCH=false
+        if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS"; then
+            KEYWORD_MATCH=true
+        fi
 
-            # Check if we already have a comment on this post
-            POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
-            OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -gt 0 ]; then
-                mark_engaged "$POST_ID"
-                continue
-            fi
+        # Must match at least one
+        [ "$MENTIONS_US" = false ] && [ "$KEYWORD_MATCH" = false ] && continue
 
+        # Check if we already have a comment on this post
+        POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
+        OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
+        if [ "$OUR_EXISTING" -gt 0 ]; then
+            mark_engaged "$POST_ID"
+            continue
+        fi
+
+        # Determine if this is a direct integration request or general outreach
+        IS_INTEGRATION=false
+        if [ "$MENTIONS_US" = true ] || is_integration_comment "$POST_BODY" || is_integration_comment "$POST_TITLE"; then
+            IS_INTEGRATION=true
+        fi
+
+        if [ "$IS_INTEGRATION" = true ]; then
             log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
-
             CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
 
 Post author: $POST_AGENT_NAME
@@ -410,45 +488,54 @@ Post title: $POST_TITLE
 Post body (first 800 chars): ${POST_BODY:0:800}
 
 This agent is building something relevant to us. Write a compelling comment that shows how Agent Casino could integrate with or complement their project. Be specific about which of our features are relevant. Invite them to use our SDK and code. Start with @$POST_AGENT_NAME."
-
             REPLY=$(generate_integration_reply "$CONTEXT")
+        else
+            log "Phase 2 OUTREACH: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
+            CONTEXT="Write a comment on this hackathon forum post by another agent. Their topic has genuine overlap with something we've built.
 
-            if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
-                log "  WARNING: Empty reply, skipping"
-                continue
-            fi
+Post author: $POST_AGENT_NAME
+Post title: $POST_TITLE
+Post body (first 800 chars): ${POST_BODY:0:800}
 
-            # Strip meta-commentary
-            REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
-            REPLY=$(echo "$REPLY" | sed '/^$/d')
+Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight from your experience building Agent Casino. Then naturally mention whichever ONE feature of ours connects to what they're doing. Start with @$POST_AGENT_NAME."
+            REPLY=$(generate_outreach_reply "$CONTEXT")
+        fi
 
-            # Ensure @mention
-            if ! echo "$REPLY" | grep -qi "^@"; then
-                REPLY="@$POST_AGENT_NAME — $REPLY"
-            fi
+        if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
+            log "  WARNING: Empty reply, skipping"
+            continue
+        fi
 
-            if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
-                log "  WARNING: Reply looks bad, skipping"
-                continue
-            fi
+        # Strip meta-commentary
+        REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
+        REPLY=$(echo "$REPLY" | sed '/^$/d')
 
-            log "  Reply: ${REPLY:0:150}..."
+        # Ensure @mention
+        if ! echo "$REPLY" | grep -qi "^@"; then
+            REPLY="@$POST_AGENT_NAME — $REPLY"
+        fi
 
-            ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
-            RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+            log "  WARNING: Reply looks bad, skipping"
+            continue
+        fi
 
-            if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
-                log "  ERROR: Failed to post: $(echo "$RESULT" | jq -r '.error')"
-            else
-                COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
-                log "  SUCCESS: Integration outreach posted (ID: $COMMENT_ID)"
-                mark_engaged "$POST_ID"
-                REPLY_COUNT=$((REPLY_COUNT + 1))
-                INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
-                sleep 3
-            fi
-        done
-    fi
+        log "  Reply: ${REPLY:0:150}..."
+
+        ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
+        RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+
+        if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
+            log "  ERROR: Failed to post: $(echo "$RESULT" | jq -r '.error')"
+        else
+            COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
+            log "  SUCCESS: Outreach posted (ID: $COMMENT_ID) [$([ "$IS_INTEGRATION" = true ] && echo 'integration' || echo 'outreach')]"
+            mark_engaged "$POST_ID"
+            REPLY_COUNT=$((REPLY_COUNT + 1))
+            INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
+            sleep 3
+        fi
+    done
 fi
 
 log "Phase 2 complete: $INTEGRATION_REPLIES integration outreach replies"
@@ -457,114 +544,112 @@ log "Phase 2 complete: $INTEGRATION_REPLIES integration outreach replies"
 if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
     log "Phase 3: Checking hot posts for engagement opportunities..."
 
-    HOT_POSTS=$(api_get "/forum/posts?sort=hot&limit=15")
+    # Scan two pages of hot posts (40 total) for high-visibility engagement
+    ALL_HOT_POSTS="[]"
+    for offset in 0 20; do
+        PAGE=$(api_get "/forum/posts?sort=hot&limit=20&offset=$offset")
+        if ! echo "$PAGE" | jq -e '.error' > /dev/null 2>&1; then
+            ALL_HOT_POSTS=$(echo "$ALL_HOT_POSTS" "$PAGE" | jq -s '.[0] + [.[1].posts[]?]')
+        fi
+        sleep 1
+    done
+    HOT_COUNT=$(echo "$ALL_HOT_POSTS" | jq 'length')
 
-    if ! echo "$HOT_POSTS" | jq -e '.error' > /dev/null 2>&1; then
-        HOT_COUNT=$(echo "$HOT_POSTS" | jq '.posts | length')
+    for i in $(seq 0 $(( HOT_COUNT - 1 ))); do
+        [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
 
-        for i in $(seq 0 $(( HOT_COUNT - 1 ))); do
-            [ "$REPLY_COUNT" -ge "$MAX_REPLIES_PER_RUN" ] && break
+        POST=$(echo "$ALL_HOT_POSTS" | jq -c ".[$i]")
+        POST_ID=$(echo "$POST" | jq -r '.id')
+        POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
+        POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
+        POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
+        POST_BODY=$(echo "$POST" | jq -r '.body // ""')
 
-            POST=$(echo "$HOT_POSTS" | jq -c ".posts[$i]")
-            POST_ID=$(echo "$POST" | jq -r '.id')
-            POST_AGENT_ID=$(echo "$POST" | jq -r '.agentId // 0')
-            POST_AGENT_NAME=$(echo "$POST" | jq -r '.agentName // "unknown"')
-            POST_TITLE=$(echo "$POST" | jq -r '.title // ""')
-            POST_BODY=$(echo "$POST" | jq -r '.body // ""')
+        # Skip our own posts and spam bots
+        [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ] && continue
+        echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS" && continue
 
-            # Skip our own posts
-            if [ "$POST_AGENT_ID" = "$OUR_AGENT_ID" ]; then
-                continue
-            fi
+        # Skip if already engaged
+        already_engaged "$POST_ID" && continue
 
-            # Skip spam bots
-            if echo "$POST_AGENT_NAME" | grep -qiE "$SPAM_BOTS"; then
-                continue
-            fi
+        # Check if we already have a comment on this post
+        POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
+        OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
+        if [ "$OUR_EXISTING" -gt 0 ]; then
+            mark_engaged "$POST_ID"
+            continue
+        fi
 
-            # Skip if already engaged
-            if already_engaged "$POST_ID"; then
-                continue
-            fi
+        # Only engage with hot posts relevant to our domain (uses same broad keywords as Phase 2)
+        IS_RELEVANT=false
+        if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS|Agent.Casino|Romulus.Sol|Claude.the.Romulan"; then
+            IS_RELEVANT=true
+        fi
+        [ "$IS_RELEVANT" = false ] && continue
 
-            # Check if we already have a comment on this post
-            POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
-            OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
-            if [ "$OUR_EXISTING" -gt 0 ]; then
-                mark_engaged "$POST_ID"
-                continue
-            fi
+        # Check if it's specifically an integration opportunity
+        IS_INTEGRATION=false
+        if is_integration_comment "$POST_BODY" || is_integration_comment "$POST_TITLE"; then
+            IS_INTEGRATION=true
+        fi
 
-            # Only engage with hot posts relevant to our domain
-            IS_RELEVANT=false
-            if echo "$POST_BODY $POST_TITLE" | grep -qiE "$OUTREACH_KEYWORDS|Agent.Casino|Romulus.Sol|Claude.the.Romulan|DeFi|trading.*bot|yield|treasury|escrow|oracle|VRF|randomness"; then
-                IS_RELEVANT=true
-            fi
-            [ "$IS_RELEVANT" = false ] && continue
-
-            # Check if it's specifically an integration opportunity
-            IS_INTEGRATION=false
-            if is_integration_comment "$POST_BODY" || is_integration_comment "$POST_TITLE"; then
-                IS_INTEGRATION=true
-            fi
-
-            if [ "$IS_INTEGRATION" = true ]; then
-                log "*** INTEGRATION OPPORTUNITY in hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
-            else
-                log "Engaging with relevant hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
-            fi
-
-            # Generate engagement comment
-            CONTEXT="Write a comment on this hackathon forum post by another agent:
+        if [ "$IS_INTEGRATION" = true ]; then
+            log "*** Phase 3 INTEGRATION in hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
+            CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
 
 Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
-Post body (first 500 chars): ${POST_BODY:0:500}
+Post body (first 800 chars): ${POST_BODY:0:800}
 
-Write a genuine, helpful comment. Start with @$POST_AGENT_NAME. Be substantive — ask a specific question or share a relevant insight. Only mention Agent Casino if there's a genuine technical connection to what they're building."
+This agent is building something relevant to us. Write a compelling comment showing how Agent Casino could integrate with their project. Start with @$POST_AGENT_NAME."
+            REPLY=$(generate_integration_reply "$CONTEXT")
+        else
+            log "Phase 3 OUTREACH: hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
+            CONTEXT="Write a comment on this popular hackathon forum post by another agent. Their topic has genuine overlap with something we've built.
 
-            if [ "$IS_INTEGRATION" = true ]; then
-                REPLY=$(generate_integration_reply "$CONTEXT")
-            else
-                REPLY=$(generate_reply "$CONTEXT")
-            fi
+Post author: $POST_AGENT_NAME
+Post title: $POST_TITLE
+Post body (first 800 chars): ${POST_BODY:0:800}
 
-            if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
-                log "  WARNING: Empty or too short reply generated, skipping"
-                continue
-            fi
+Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight from your experience building Agent Casino. Then naturally mention whichever ONE feature of ours connects to what they're doing. Start with @$POST_AGENT_NAME."
+            REPLY=$(generate_outreach_reply "$CONTEXT")
+        fi
 
-            # Strip any meta-commentary
-            REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -10)
-            REPLY=$(echo "$REPLY" | sed '/^$/d')
+        if [ -z "$REPLY" ] || [ ${#REPLY} -lt 10 ]; then
+            log "  WARNING: Empty or too short reply generated, skipping"
+            continue
+        fi
 
-            # Ensure @mention
-            if ! echo "$REPLY" | grep -qi "^@"; then
-                REPLY="@$POST_AGENT_NAME — $REPLY"
-            fi
+        # Strip any meta-commentary
+        REPLY=$(echo "$REPLY" | grep -v "^Done\|^I \(posted\|wrote\|created\)\|^Here\|^The comment\|^✅\|^Let me\|^\*\*" | head -15)
+        REPLY=$(echo "$REPLY" | sed '/^$/d')
 
-            # Final sanity check
-            if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
-                log "  WARNING: Reply looks like an error message, skipping"
-                continue
-            fi
+        # Ensure @mention
+        if ! echo "$REPLY" | grep -qi "^@"; then
+            REPLY="@$POST_AGENT_NAME — $REPLY"
+        fi
 
-            log "  Comment: ${REPLY:0:120}..."
+        # Final sanity check
+        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+            log "  WARNING: Reply looks like an error message, skipping"
+            continue
+        fi
 
-            ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
-            RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+        log "  Comment: ${REPLY:0:150}..."
 
-            if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
-                log "  ERROR: Failed to post comment: $(echo "$RESULT" | jq -r '.error')"
-            else
-                COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
-                log "  SUCCESS: Posted engagement comment (ID: $COMMENT_ID)"
-                mark_engaged "$POST_ID"
-                REPLY_COUNT=$((REPLY_COUNT + 1))
-                sleep 3
-            fi
-        done
-    fi
+        ESCAPED_REPLY=$(echo "$REPLY" | jq -Rs '.')
+        RESULT=$(api_post "/forum/posts/$POST_ID/comments" "{\"body\": $ESCAPED_REPLY}")
+
+        if echo "$RESULT" | jq -e '.error' > /dev/null 2>&1; then
+            log "  ERROR: Failed to post comment: $(echo "$RESULT" | jq -r '.error')"
+        else
+            COMMENT_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
+            log "  SUCCESS: Phase 3 outreach (ID: $COMMENT_ID) [$([ "$IS_INTEGRATION" = true ] && echo 'integration' || echo 'outreach')]"
+            mark_engaged "$POST_ID"
+            REPLY_COUNT=$((REPLY_COUNT + 1))
+            sleep 3
+        fi
+    done
 
     log "Phase 3 complete"
 fi

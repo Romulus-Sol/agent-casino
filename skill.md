@@ -267,10 +267,7 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 
 | Command | Description |
 |---------|-------------|
-| `play-coinflip.ts <amount> <heads\|tails>` | Coin flip |
-| `play-diceroll.ts <amount> <target>` | Dice roll (target 1-5) |
-| `play-limbo.ts <amount> <multiplier>` | Limbo game |
-| `play-crash.ts <amount> <multiplier>` | Crash game |
+| `auto-play.ts [N]` | Play N random VRF games |
 | `pvp-create-challenge.ts` | Create PvP challenge |
 | `pvp-list-challenges.ts` | List open challenges |
 | `pvp-accept-challenge.ts <addr>` | Accept challenge |
@@ -287,7 +284,6 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | `lottery-draw.ts <addr>` | Draw winner (VRF) |
 | `lottery-claim.ts <addr> <ticket>` | Claim prize |
 | `lottery-view.ts <addr>` | View lottery info |
-| `auto-play.ts [N]` | Play N random VRF games |
 | `tournament.ts [players] [rounds] [bet]` | Run tournament |
 
 ## Program Info

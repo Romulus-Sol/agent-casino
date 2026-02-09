@@ -47,10 +47,11 @@ const result = await casino.crash(0.1, 10);   // ~10% win rate at 10x
 
 **CLI:**
 ```bash
-npx ts-node scripts/play-coinflip.ts 0.001 heads
-npx ts-node scripts/play-diceroll.ts 0.001 3
-npx ts-node scripts/play-limbo.ts 0.001 2.5
-npx ts-node scripts/play-crash.ts 0.001 1.5
+# Quick play (SDK handles VRF request→settle automatically)
+npx ts-node examples/quick-play.ts
+
+# Auto-play N random VRF games
+npx ts-node scripts/auto-play.ts 5
 ```
 
 ---

@@ -403,6 +403,76 @@ npm run start:server  # Starts on port 3402
 
 ---
 
+## Lottery Pool
+
+On-chain lottery with VRF-drawn winners. Buy tickets, and when the sale ends, a random winner is picked using Switchboard VRF.
+
+### Create a Lottery
+```typescript
+// Create lottery: 0.01 SOL per ticket, max 10 tickets, ends in 1000 slots
+const lottery = await casino.createLottery(0.01, 10, endSlot);
+console.log(`Lottery: ${lottery.lotteryAddress}`);
+```
+
+### Buy Tickets
+```typescript
+const ticket = await casino.buyLotteryTicket(lotteryAddress);
+console.log(`Ticket #${ticket.ticketNumber}`);
+```
+
+### Draw Winner (VRF)
+After end_slot, anyone can trigger the draw using Switchboard VRF:
+```bash
+npx ts-node scripts/lottery-draw.ts <lottery_address>
+```
+
+### Claim Prize
+```typescript
+const result = await casino.claimLotteryPrize(lotteryAddress, ticketNumber);
+console.log(`Won ${result.prize} SOL!`);
+```
+
+### CLI Scripts
+```bash
+npx ts-node scripts/lottery-create.ts <price_sol> <max_tickets> <duration_slots>
+npx ts-node scripts/lottery-buy.ts <lottery_address>
+npx ts-node scripts/lottery-draw.ts <lottery_address>
+npx ts-node scripts/lottery-claim.ts <lottery_address> <ticket_number>
+npx ts-node scripts/lottery-view.ts <lottery_address>
+```
+
+---
+
+## Auto-Play Bot
+
+Automated multi-game bot that plays across all 4 VRF game types. Useful for testing, generating on-chain activity, and backtesting strategies.
+
+```bash
+# Play 20 games (default)
+npx ts-node scripts/auto-play.ts
+
+# Play 50 games
+npx ts-node scripts/auto-play.ts 50
+```
+
+Game mix: 40% coin flip, 25% dice roll, 20% limbo, 15% crash. Each game uses a fresh Switchboard VRF randomness account.
+
+---
+
+## Tournament Mode
+
+Multi-round elimination tournament using VRF games. Virtual players compete across rounds, bottom half eliminated each round.
+
+```bash
+# 8 players, 3 rounds, 0.001 SOL per game
+npx ts-node scripts/tournament.ts
+
+# Custom: 16 players, 4 rounds, 0.002 SOL
+npx ts-node scripts/tournament.ts 16 4 0.002
+```
+
+---
+
 ## Architecture
 
 ```
@@ -608,3 +678,6 @@ class HitmanMarket {
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
 - [x] 100% SDK instruction coverage (44+ instructions)
 - [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 98 vulnerabilities fixed, 0 remaining)
+- [x] Lottery pool with VRF-drawn winners (on-chain)
+- [x] Auto-play bot (multi-game, all 4 VRF game types)
+- [x] Tournament mode (multi-round elimination)

@@ -48,7 +48,7 @@ agent-casino/
 
 **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 
-**Key Instructions (44+ total):**
+**Key Instructions (62 total):**
 - `initialize_house(house_edge_bps, min_bet, max_bet_percent)` - Set up the casino
 - `add_liquidity(amount)` / `remove_liquidity(amount)` - LP management
 - `vrf_coin_flip_request/settle` - VRF coin flip (2-step)
@@ -59,6 +59,7 @@ agent-casino/
 - `create_challenge/accept_challenge` - PvP
 - `deposit_memory/pull_memory/rate_memory` - Memory Slots
 - `create_hit/claim_hit/submit_proof/verify_hit/arbitrate_hit` - Hitman Market
+- `create_lottery/buy_lottery_ticket/draw_lottery_winner/claim_lottery_prize` - Lottery Pool
 
 **Accounts (PDAs):**
 | Account | Seeds | Purpose |
@@ -71,6 +72,8 @@ agent-casino/
 | VrfRequest | `["vrf_request", house, game_index]` | VRF game request |
 | MemoryPool | `["memory_pool"]` | Memory Slots pool |
 | HitPool | `["hit_pool"]` | Hitman bounty pool |
+| Lottery | `["lottery", house, lottery_index]` | Lottery pool |
+| LotteryTicket | `["ticket", lottery, ticket_number]` | Individual ticket |
 
 **Randomness:** Switchboard VRF only. All non-VRF (clock-based) instructions removed in Audit 6.
 

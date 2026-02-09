@@ -2542,6 +2542,188 @@ pub mod agent_casino {
         Ok(())
     }
 
+    // === Lottery Instructions ===
+
+    /// Create a new lottery pool
+    pub fn create_lottery(
+        ctx: Context<CreateLottery>,
+        ticket_price: u64,
+        max_tickets: u16,
+        end_slot: u64,
+    ) -> Result<()> {
+        require!(ticket_price >= 1000, CasinoError::InvalidAmount); // min 0.000001 SOL
+        require!(max_tickets >= 2 && max_tickets <= 1000, CasinoError::LotteryInvalidTickets);
+
+        let clock = Clock::get()?;
+        require!(end_slot > clock.slot, CasinoError::LotteryInvalidEndSlot);
+
+        let house = &mut ctx.accounts.house;
+        let lottery_index = house.total_games;
+        house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.house = ctx.accounts.house.key();
+        lottery.creator = ctx.accounts.creator.key();
+        lottery.ticket_price = ticket_price;
+        lottery.max_tickets = max_tickets;
+        lottery.tickets_sold = 0;
+        lottery.total_pool = 0;
+        lottery.winner_ticket = 0;
+        lottery.status = 0; // Open
+        lottery.end_slot = end_slot;
+        lottery.lottery_index = lottery_index;
+        lottery.randomness_account = Pubkey::default();
+        lottery.bump = ctx.bumps.lottery;
+
+        emit!(LotteryCreated {
+            lottery: ctx.accounts.lottery.key(),
+            creator: ctx.accounts.creator.key(),
+            ticket_price,
+            max_tickets,
+            end_slot,
+            lottery_index,
+        });
+
+        Ok(())
+    }
+
+    /// Buy a lottery ticket
+    pub fn buy_lottery_ticket(ctx: Context<BuyLotteryTicket>) -> Result<()> {
+        let lottery = &ctx.accounts.lottery;
+        require!(lottery.status == 0, CasinoError::LotteryNotOpen);
+        require!(lottery.tickets_sold < lottery.max_tickets, CasinoError::LotteryFull);
+
+        let clock = Clock::get()?;
+        require!(clock.slot < lottery.end_slot, CasinoError::LotteryEnded);
+
+        let ticket_price = lottery.ticket_price;
+        let ticket_number = lottery.tickets_sold;
+        let lottery_key = ctx.accounts.lottery.key();
+        let buyer_key = ctx.accounts.buyer.key();
+
+        // Transfer ticket price to house
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.buyer.to_account_info(),
+                to: ctx.accounts.house.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_context, ticket_price)?;
+
+        // Initialize ticket first (before mutable borrow of lottery)
+        let ticket = &mut ctx.accounts.ticket;
+        ticket.lottery = lottery_key;
+        ticket.buyer = buyer_key;
+        ticket.ticket_number = ticket_number;
+        ticket.bump = ctx.bumps.ticket;
+
+        // Update lottery
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.tickets_sold = lottery.tickets_sold.checked_add(1).ok_or(CasinoError::MathOverflow)?;
+        lottery.total_pool = lottery.total_pool.checked_add(ticket_price).ok_or(CasinoError::MathOverflow)?;
+
+        let total_pool = lottery.total_pool;
+
+        emit!(LotteryTicketBought {
+            lottery: lottery_key,
+            buyer: buyer_key,
+            ticket_number,
+            total_pool,
+        });
+
+        Ok(())
+    }
+
+    /// Draw a lottery winner using Switchboard VRF
+    pub fn draw_lottery_winner(ctx: Context<DrawLotteryWinner>) -> Result<()> {
+        let lottery = &ctx.accounts.lottery;
+        require!(lottery.status == 0, CasinoError::LotteryAlreadyDrawn);
+        require!(lottery.tickets_sold > 0, CasinoError::LotteryNoTickets);
+
+        let clock = Clock::get()?;
+        require!(clock.slot >= lottery.end_slot, CasinoError::LotteryNotEnded);
+
+        // Load Switchboard randomness
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        // Extract values before mutable borrows
+        let tickets_sold = lottery.tickets_sold;
+        let total_pool = lottery.total_pool;
+        let lottery_key = ctx.accounts.lottery.key();
+        let randomness_key = ctx.accounts.randomness_account.key();
+        let house_edge_bps = ctx.accounts.house.house_edge_bps;
+
+        // Pick winner: use first 4 bytes as u32, mod tickets_sold
+        let raw = u32::from_le_bytes([randomness[0], randomness[1], randomness[2], randomness[3]]);
+        let winner_ticket = (raw % tickets_sold as u32) as u16;
+
+        // House takes its edge from the pool
+        let house_cut = (total_pool as u128 * house_edge_bps as u128 / 10000) as u64;
+
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.winner_ticket = winner_ticket;
+        lottery.status = 2; // Settled
+        lottery.randomness_account = randomness_key;
+
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_add(house_cut).ok_or(CasinoError::MathOverflow)?;
+        house.total_volume = house.total_volume.checked_add(total_pool).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(LotteryDrawn {
+            lottery: lottery_key,
+            winner_ticket,
+            total_pool,
+            tickets_sold,
+        });
+
+        Ok(())
+    }
+
+    /// Claim lottery prize (winner only)
+    pub fn claim_lottery_prize(ctx: Context<ClaimLotteryPrize>) -> Result<()> {
+        let lottery = &ctx.accounts.lottery;
+        require!(lottery.status == 2, CasinoError::LotteryNotDrawn);
+
+        let ticket = &ctx.accounts.ticket;
+        require!(ticket.ticket_number == lottery.winner_ticket, CasinoError::NotLotteryWinner);
+        require!(ticket.buyer == ctx.accounts.winner.key(), CasinoError::NotLotteryWinner);
+
+        // Calculate prize (pool minus house edge, already deducted in draw)
+        let house = &ctx.accounts.house;
+        let house_cut = (lottery.total_pool as u128 * house.house_edge_bps as u128 / 10000) as u64;
+        let prize = lottery.total_pool.checked_sub(house_cut).ok_or(CasinoError::MathOverflow)?;
+
+        // Transfer prize from house to winner
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= prize;
+        **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += prize;
+
+        // Mark as claimed
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.status = 3; // Claimed
+
+        let house = &mut ctx.accounts.house;
+        house.total_payout = house.total_payout.checked_add(prize).ok_or(CasinoError::MathOverflow)?;
+
+        emit!(LotteryPrizeClaimed {
+            lottery: ctx.accounts.lottery.key(),
+            winner: ctx.accounts.winner.key(),
+            prize,
+        });
+
+        Ok(())
+    }
+
+    /// Close a settled lottery to recover rent
+    pub fn close_lottery(_ctx: Context<CloseLottery>) -> Result<()> {
+        Ok(())
+    }
+
     /// Cancel an unmatched price prediction
     pub fn cancel_price_prediction(ctx: Context<CancelPricePrediction>) -> Result<()> {
         let prediction = &ctx.accounts.price_prediction;
@@ -4064,6 +4246,34 @@ pub enum VrfStatus {
     Expired,    // Timeout - refund available
 }
 
+// === Lottery ===
+
+#[account]
+#[derive(InitSpace)]
+pub struct Lottery {
+    pub house: Pubkey,              // 32
+    pub creator: Pubkey,            // 32
+    pub ticket_price: u64,          // 8
+    pub max_tickets: u16,           // 2
+    pub tickets_sold: u16,          // 2
+    pub total_pool: u64,            // 8
+    pub winner_ticket: u16,         // 2
+    pub status: u8,                 // 1 (0=Open, 1=reserved, 2=Settled, 3=Claimed)
+    pub end_slot: u64,              // 8
+    pub lottery_index: u64,         // 8
+    pub randomness_account: Pubkey, // 32
+    pub bump: u8,                   // 1
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct LotteryTicket {
+    pub lottery: Pubkey,            // 32
+    pub buyer: Pubkey,              // 32
+    pub ticket_number: u16,         // 2
+    pub bump: u8,                   // 1
+}
+
 // === Pyth Price Prediction Support ===
 
 /// Price prediction bet - bet on real-world price movements
@@ -4535,6 +4745,41 @@ pub struct PricePredictionCancelled {
     pub refund: u64,
 }
 
+// Lottery events
+
+#[event]
+pub struct LotteryCreated {
+    pub lottery: Pubkey,
+    pub creator: Pubkey,
+    pub ticket_price: u64,
+    pub max_tickets: u16,
+    pub end_slot: u64,
+    pub lottery_index: u64,
+}
+
+#[event]
+pub struct LotteryTicketBought {
+    pub lottery: Pubkey,
+    pub buyer: Pubkey,
+    pub ticket_number: u16,
+    pub total_pool: u64,
+}
+
+#[event]
+pub struct LotteryDrawn {
+    pub lottery: Pubkey,
+    pub winner_ticket: u16,
+    pub total_pool: u64,
+    pub tickets_sold: u16,
+}
+
+#[event]
+pub struct LotteryPrizeClaimed {
+    pub lottery: Pubkey,
+    pub winner: Pubkey,
+    pub prize: u64,
+}
+
 // === Close Account Contexts (rent recovery) ===
 
 #[derive(Accounts)]
@@ -4713,6 +4958,122 @@ pub struct CloseHit<'info> {
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == hit.poster @ CasinoError::NotHitPoster)]
+    pub authority: Signer<'info>,
+}
+
+// === Lottery Account Contexts ===
+
+#[derive(Accounts)]
+pub struct CreateLottery<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + Lottery::INIT_SPACE,
+        seeds = [b"lottery", house.key().as_ref(), &house.total_games.to_le_bytes()],
+        bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct BuyLotteryTicket<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    #[account(
+        init,
+        payer = buyer,
+        space = 8 + LotteryTicket::INIT_SPACE,
+        seeds = [b"ticket", lottery.key().as_ref(), &lottery.tickets_sold.to_le_bytes()],
+        bump
+    )]
+    pub ticket: Account<'info, LotteryTicket>,
+
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DrawLotteryWinner<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    /// CHECK: Switchboard randomness account
+    pub randomness_account: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub drawer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimLotteryPrize<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    #[account(
+        seeds = [b"ticket", lottery.key().as_ref(), &ticket.ticket_number.to_le_bytes()],
+        bump = ticket.bump,
+        constraint = ticket.lottery == lottery.key() @ CasinoError::LotteryHouseMismatch,
+    )]
+    pub ticket: Account<'info, LotteryTicket>,
+
+    #[account(mut)]
+    pub winner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseLottery<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        close = recipient,
+        constraint = lottery.status == 3 @ CasinoError::NotCloseable,
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump,
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    /// CHECK: Rent recipient (creator gets rent back)
+    #[account(mut, constraint = recipient.key() == lottery.creator @ CasinoError::NotLotteryCreator)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == lottery.creator @ CasinoError::NotLotteryCreator)]
     pub authority: Signer<'info>,
 }
 
@@ -4908,4 +5269,29 @@ pub enum CasinoError {
     InsufficientPoolBalance,
     #[msg("Invalid remaining accounts for arbiter payouts")]
     InvalidRemainingAccounts,
+    // Lottery errors
+    #[msg("Lottery is not open")]
+    LotteryNotOpen,
+    #[msg("Lottery is full (max tickets sold)")]
+    LotteryFull,
+    #[msg("Lottery has not ended yet")]
+    LotteryNotEnded,
+    #[msg("Lottery has already been drawn")]
+    LotteryAlreadyDrawn,
+    #[msg("Not the lottery winner")]
+    NotLotteryWinner,
+    #[msg("Lottery has no tickets")]
+    LotteryNoTickets,
+    #[msg("Lottery has ended")]
+    LotteryEnded,
+    #[msg("Invalid ticket count (must be 2-1000)")]
+    LotteryInvalidTickets,
+    #[msg("Invalid end slot (must be in the future)")]
+    LotteryInvalidEndSlot,
+    #[msg("Lottery house mismatch")]
+    LotteryHouseMismatch,
+    #[msg("Not the lottery creator")]
+    NotLotteryCreator,
+    #[msg("Lottery not yet drawn")]
+    LotteryNotDrawn,
 }

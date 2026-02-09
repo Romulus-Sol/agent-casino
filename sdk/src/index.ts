@@ -2260,6 +2260,163 @@ export class AgentCasino {
       .rpc();
   }
 
+  // === Lottery Methods ===
+
+  /**
+   * Create a new lottery pool
+   * @param ticketPriceSol Price per ticket in SOL
+   * @param maxTickets Maximum number of tickets (2-1000)
+   * @param endSlot Slot number when ticket sales end
+   */
+  async createLottery(ticketPriceSol: number, maxTickets: number, endSlot: number): Promise<{ tx: string; lotteryAddress: string; lotteryIndex: number }> {
+    await this.loadProgram();
+    const ticketPrice = new BN(ticketPriceSol * LAMPORTS_PER_SOL);
+
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const lotteryIndex = (houseAccount as any).totalGames;
+
+    const [lotteryPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lottery"), this.housePda.toBuffer(), lotteryIndex.toArrayLike(Buffer, "le", 8)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .createLottery(ticketPrice, maxTickets, new BN(endSlot))
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        creator: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, lotteryAddress: lotteryPda.toString(), lotteryIndex: lotteryIndex.toNumber() };
+  }
+
+  /**
+   * Buy a lottery ticket
+   * @param lotteryAddress The lottery PDA address
+   */
+  async buyLotteryTicket(lotteryAddress: string): Promise<{ tx: string; ticketAddress: string; ticketNumber: number }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+    const lottery = await this.program.account.lottery.fetch(lotteryPda);
+
+    const ticketNumber = (lottery as any).ticketsSold;
+    const [ticketPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ticket"), lotteryPda.toBuffer(), new BN(ticketNumber).toArrayLike(Buffer, "le", 2)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .buyLotteryTicket()
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        ticket: ticketPda,
+        buyer: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, ticketAddress: ticketPda.toString(), ticketNumber };
+  }
+
+  /**
+   * Draw a lottery winner using Switchboard VRF randomness
+   * @param lotteryAddress The lottery PDA address
+   * @param randomnessAccount Switchboard randomness account with revealed value
+   */
+  async drawLotteryWinner(lotteryAddress: string, randomnessAccount: string): Promise<{ tx: string; winnerTicket: number }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+
+    const tx = await this.program.methods
+      .drawLotteryWinner()
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        drawer: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const settled = await this.program.account.lottery.fetch(lotteryPda);
+    return { tx, winnerTicket: (settled as any).winnerTicket };
+  }
+
+  /**
+   * Claim lottery prize (winner only)
+   * @param lotteryAddress The lottery PDA address
+   * @param ticketNumber The winning ticket number
+   */
+  async claimLotteryPrize(lotteryAddress: string, ticketNumber: number): Promise<{ tx: string; prize: number }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+
+    const [ticketPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ticket"), lotteryPda.toBuffer(), new BN(ticketNumber).toArrayLike(Buffer, "le", 2)],
+      PROGRAM_ID
+    );
+
+    const lottery = await this.program.account.lottery.fetch(lotteryPda);
+    const houseAccount = await this.program.account.house.fetch(this.housePda);
+    const totalPool = (lottery as any).totalPool.toNumber();
+    const houseEdge = (houseAccount as any).houseEdgeBps;
+    const prize = totalPool - Math.floor(totalPool * houseEdge / 10000);
+
+    const tx = await this.program.methods
+      .claimLotteryPrize()
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        ticket: ticketPda,
+        winner: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx, prize: prize / LAMPORTS_PER_SOL };
+  }
+
+  /**
+   * Get lottery info
+   * @param lotteryAddress The lottery PDA address
+   */
+  async getLotteryInfo(lotteryAddress: string): Promise<{
+    address: string;
+    creator: string;
+    ticketPrice: number;
+    maxTickets: number;
+    ticketsSold: number;
+    totalPool: number;
+    winnerTicket: number;
+    status: string;
+    endSlot: number;
+    lotteryIndex: number;
+  }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+    const lottery = await this.program.account.lottery.fetch(lotteryPda);
+    const l = lottery as any;
+
+    const statusMap: Record<number, string> = { 0: 'Open', 1: 'Drawing', 2: 'Settled', 3: 'Claimed' };
+
+    return {
+      address: lotteryAddress,
+      creator: l.creator.toString(),
+      ticketPrice: l.ticketPrice.toNumber() / LAMPORTS_PER_SOL,
+      maxTickets: l.maxTickets,
+      ticketsSold: l.ticketsSold,
+      totalPool: l.totalPool.toNumber() / LAMPORTS_PER_SOL,
+      winnerTicket: l.winnerTicket,
+      status: statusMap[l.status] || 'Unknown',
+      endSlot: l.endSlot.toNumber(),
+      lotteryIndex: l.lotteryIndex.toNumber(),
+    };
+  }
+
   // === VRF Game Methods (Switchboard Randomness) ===
 
   /**

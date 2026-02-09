@@ -18,11 +18,6 @@ async function main() {
     [Buffer.from("house")],
     PROGRAM_ID
   );
-  const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), housePda.toBuffer()],
-    PROGRAM_ID
-  );
-
   const houseAccount = await provider.connection.getAccountInfo(housePda);
   if (!houseAccount) {
     console.log("House not initialized");
@@ -56,12 +51,10 @@ async function main() {
 
   const totalPayout = data.readBigUInt64LE(offset);
 
-  // Get vault balance
-  const vaultBalance = await provider.connection.getBalance(vaultPda);
+  const houseBalance = await provider.connection.getBalance(housePda);
 
   console.log("=== Agent Casino House Status ===\n");
   console.log("House PDA:", housePda.toString());
-  console.log("Vault PDA:", vaultPda.toString());
   console.log("Authority:", authority.toString());
   console.log("");
   console.log("Configuration:");
@@ -71,7 +64,7 @@ async function main() {
   console.log("");
   console.log("Pool Status:");
   console.log("  Pool (tracked):", (Number(pool) / LAMPORTS_PER_SOL).toFixed(4), "SOL");
-  console.log("  Vault Balance:", (vaultBalance / LAMPORTS_PER_SOL).toFixed(4), "SOL");
+  console.log("  House Balance:", (houseBalance / LAMPORTS_PER_SOL).toFixed(4), "SOL");
   console.log("  Max Bet Amount:", ((Number(pool) * maxBetPercent / 100) / LAMPORTS_PER_SOL).toFixed(4), "SOL");
   console.log("");
   console.log("Stats:");

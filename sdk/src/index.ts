@@ -215,7 +215,6 @@ export class AgentCasino {
   private wallet: Wallet;
   private provider: AnchorProvider;
   private housePda: PublicKey;
-  private vaultPda: PublicKey;
   private memoryPoolPda: PublicKey;
   private config: CasinoConfig;
   private program: Program | null = null;
@@ -255,10 +254,6 @@ export class AgentCasino {
     // Derive PDAs
     [this.housePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('house')],
-      programId
-    );
-    [this.vaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('vault'), this.housePda.toBuffer()],
       programId
     );
     [this.memoryPoolPda] = PublicKey.findProgramAddressSync(
@@ -750,7 +745,6 @@ export class AgentCasino {
       programId: PROGRAM_ID,
       keys: [
         { pubkey: this.housePda, isSigner: false, isWritable: true },
-        { pubkey: this.vaultPda, isSigner: false, isWritable: true },
         { pubkey: lpPositionPda, isSigner: false, isWritable: true },
         { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },

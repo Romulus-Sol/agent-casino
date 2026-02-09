@@ -2898,13 +2898,6 @@ pub struct InitializeHouse<'info> {
     )]
     pub house: Account<'info, House>,
 
-    /// CHECK: PDA for holding SOL
-    #[account(
-        seeds = [b"vault", house.key().as_ref()],
-        bump
-    )]
-    pub house_vault: AccountInfo<'info>,
-
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -2976,14 +2969,6 @@ pub struct InitTokenLpPosition<'info> {
 pub struct AddLiquidity<'info> {
     #[account(mut, seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
-
-    /// CHECK: PDA vault
-    #[account(
-        mut,
-        seeds = [b"vault", house.key().as_ref()],
-        bump
-    )]
-    pub house_vault: AccountInfo<'info>,
 
     #[account(
         mut,

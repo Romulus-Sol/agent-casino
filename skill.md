@@ -302,7 +302,6 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | Account | Seeds |
 |---------|-------|
 | House | `["house"]` |
-| Vault | `["vault", house]` |
 | GameRecord | `["game", house, game_index]` |
 | AgentStats | `["agent", player]` |
 | LpPosition | `["lp", house, provider]` |

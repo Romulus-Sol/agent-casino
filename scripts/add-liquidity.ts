@@ -25,10 +25,6 @@ async function main() {
     [Buffer.from("house")],
     PROGRAM_ID
   );
-  const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), housePda.toBuffer()],
-    PROGRAM_ID
-  );
   const [lpPositionPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("lp"), housePda.toBuffer(), provider.wallet.publicKey.toBuffer()],
     PROGRAM_ID
@@ -46,7 +42,6 @@ async function main() {
     programId: PROGRAM_ID,
     keys: [
       { pubkey: housePda, isSigner: false, isWritable: true },
-      { pubkey: vaultPda, isSigner: false, isWritable: true },
       { pubkey: lpPositionPda, isSigner: false, isWritable: true },
       { pubkey: provider.wallet.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -61,9 +56,9 @@ async function main() {
     console.log("\n✅ Liquidity added!");
     console.log("Transaction:", sig);
 
-    const vaultBalance = await provider.connection.getBalance(vaultPda);
-    console.log("\nNew pool balance:", (vaultBalance / LAMPORTS_PER_SOL).toFixed(4), "SOL");
-    console.log("New max bet:", ((vaultBalance * 0.02) / LAMPORTS_PER_SOL).toFixed(4), "SOL");
+    const houseBalance = await provider.connection.getBalance(housePda);
+    console.log("\nHouse pool balance:", (houseBalance / LAMPORTS_PER_SOL).toFixed(4), "SOL");
+    console.log("Max bet:", ((houseBalance * 0.02) / LAMPORTS_PER_SOL).toFixed(4), "SOL");
   } catch (e: any) {
     console.error("\n❌ Failed:", e.message);
     if (e.logs) {

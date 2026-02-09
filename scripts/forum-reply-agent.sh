@@ -280,6 +280,9 @@ REPLY RULES:
     echo "$reply"
 }
 
+# Track agents we've replied to per post THIS RUN (prevents triple-reply to same agent)
+declare -A REPLIED_THIS_RUN  # key: "postId:agentNameLower" → 1
+
 # ── Main Logic ────────────────────────────────────────────────────
 log "═══ FORUM REPLY AGENT START ═══"
 
@@ -320,12 +323,22 @@ for POST_ID in "${POST_IDS[@]}"; do
             continue
         fi
 
-        # Skip if we already have a reply mentioning @AgentName on this post (robust jq check)
+        # Timestamp-aware dedup: skip if this comment is OLDER than our latest reply to this agent.
+        # But if the comment is NEWER (a follow-up), we should respond.
         AGENT_NAME_LOWER=$(echo "$AGENT_NAME" | tr '[:upper:]' '[:lower:]')
-        ALREADY_REPLIED_TO_AGENT=$(echo "$OUR_COMMENTS" | jq --arg name "$AGENT_NAME_LOWER" \
-            '[.[] | select((.body // "" | ascii_downcase | startswith("@" + $name)) or (.body // "" | ascii_downcase | contains("@" + $name + " ")) or (.body // "" | ascii_downcase | contains("@" + $name + " --")))] | length')
-        ALREADY_REPLIED_TO_AGENT=${ALREADY_REPLIED_TO_AGENT:-0}
-        if [ "$ALREADY_REPLIED_TO_AGENT" -gt 0 ]; then
+        COMMENT_TIME=$(echo "$COMMENT" | jq -r '.createdAt // ""')
+        OUR_LATEST_REPLY_TIME=$(echo "$OUR_COMMENTS" | jq -r --arg name "$AGENT_NAME_LOWER" \
+            '[.[] | select((.body // "" | ascii_downcase | startswith("@" + $name)) or (.body // "" | ascii_downcase | contains("@" + $name + " ")) or (.body // "" | ascii_downcase | contains("@" + $name + " --")))] | sort_by(.createdAt) | last | .createdAt // ""')
+        if [ -n "$OUR_LATEST_REPLY_TIME" ] && [ -n "$COMMENT_TIME" ] && [[ "$COMMENT_TIME" < "$OUR_LATEST_REPLY_TIME" ]]; then
+            # This comment predates our reply — already addressed
+            mark_replied "$COMMENT_ID"
+            continue
+        fi
+
+        # Within this run: only reply to the newest unanswered comment per agent per post.
+        # (Comments are sorted newest-first, so the first match is the latest.)
+        RUN_KEY="${POST_ID}:${AGENT_NAME_LOWER}"
+        if [ "${REPLIED_THIS_RUN[$RUN_KEY]:-}" = "1" ]; then
             mark_replied "$COMMENT_ID"
             continue
         fi
@@ -409,6 +422,7 @@ Our post is about Agent Casino. Generate a friendly, substantive reply. Start wi
             REPLY_ID=$(echo "$RESULT" | jq -r '.comment.id // "unknown"')
             log "  SUCCESS: Posted reply (comment ID: $REPLY_ID)"
             mark_replied "$COMMENT_ID"
+            REPLIED_THIS_RUN["${POST_ID}:${AGENT_NAME_LOWER}"]=1
             REPLY_COUNT=$((REPLY_COUNT + 1))
             sleep 3  # Small delay between replies
         fi

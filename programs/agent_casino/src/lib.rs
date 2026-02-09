@@ -327,7 +327,7 @@ pub mod agent_casino {
         let total_pot = amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
         let house_edge = ctx.accounts.house.house_edge_bps;
         let house_take = total_pot.checked_mul(house_edge as u64).ok_or(CasinoError::MathOverflow)? / 10000;
-        let winner_payout = total_pot - house_take;
+        let winner_payout = total_pot.checked_sub(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer house edge to house account
         if house_take > 0 {
@@ -858,7 +858,7 @@ pub mod agent_casino {
         // Calculate effective fee with early bird discount
         // effective_fee_bps = house_edge_bps * (1 - early_factor)
         let base_fee_bps = ctx.accounts.house.house_edge_bps as u64;
-        let fee_discount_bps = (base_fee_bps * early_factor_bps) / 10000;
+        let fee_discount_bps = base_fee_bps.checked_mul(early_factor_bps).ok_or(CasinoError::MathOverflow)? / 10000;
         let effective_fee_bps = base_fee_bps.checked_sub(fee_discount_bps).unwrap_or(0);
 
         // Calculate fee amount on gross winnings
@@ -1211,8 +1211,8 @@ pub mod agent_casino {
 
         let stake = memory.stake;
         // 5% withdrawal fee
-        let fee = stake / 20;
-        let refund = stake - fee;
+        let fee = stake.checked_div(20).ok_or(CasinoError::MathOverflow)?;
+        let refund = stake.checked_sub(fee).ok_or(CasinoError::MathOverflow)?;
 
         // Transfer refund to depositor
         **ctx.accounts.memory_pool.to_account_info().try_borrow_mut_lamports()? -= refund;
@@ -2291,6 +2291,7 @@ pub mod agent_casino {
         direction: PriceDirection,
         duration_seconds: i64,
         bet_amount: u64,
+        price_feed_address: Pubkey,
     ) -> Result<()> {
         let house = &ctx.accounts.house;
         require!(bet_amount >= house.min_bet, CasinoError::BetTooSmall);
@@ -2331,6 +2332,7 @@ pub mod agent_casino {
         prediction.winner = Pubkey::default();
         prediction.status = PredictionStatus::Open;
         prediction.bet_index = bet_index;
+        prediction.price_feed = price_feed_address;
         prediction.bump = ctx.bumps.price_prediction;
 
         // Update house stats
@@ -2667,8 +2669,8 @@ pub mod agent_casino {
         let randomness_key = ctx.accounts.randomness_account.key();
         let house_edge_bps = ctx.accounts.house.house_edge_bps;
 
-        // Fix #4: rejection sampling to eliminate modular bias
-        // Use 8 bytes for more uniform distribution across small ticket counts
+        // Fix #4: use full 8 bytes (u64) for minimal modular bias
+        // Bias is < 1 in 10^15 for max 1000 tickets — negligible
         let raw = u64::from_le_bytes([
             randomness[0], randomness[1], randomness[2], randomness[3],
             randomness[4], randomness[5], randomness[6], randomness[7],
@@ -2676,7 +2678,8 @@ pub mod agent_casino {
         let winner_ticket = (raw % tickets_sold as u64) as u16;
 
         // Fix #9: calculate prize at draw time and store it (immutable after draw)
-        let house_cut = (total_pool as u128 * house_edge_bps as u128 / 10000) as u64;
+        let house_cut = (total_pool as u128).checked_mul(house_edge_bps as u128).ok_or(CasinoError::MathOverflow)? / 10000;
+        let house_cut = house_cut as u64; // Safe: result <= total_pool/10 which fits u64
         let prize = total_pool.checked_sub(house_cut).ok_or(CasinoError::MathOverflow)?;
 
         let lottery = &mut ctx.accounts.lottery;
@@ -2852,11 +2855,11 @@ fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 3
 }
 
 fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
-    let gross_128 = (amount as u128) * (multiplier as u128) / 100;
+    let gross_128 = (amount as u128).saturating_mul(multiplier as u128) / 100;
     // Cap at u64::MAX (caller should validate payout fits in pool)
     let gross = if gross_128 > u64::MAX as u128 { u64::MAX } else { gross_128 as u64 };
-    let edge = (gross as u128 * house_edge_bps as u128 / 10000) as u64;
-    // Use checked_sub to avoid silent underflow
+    let edge = (gross as u128).saturating_mul(house_edge_bps as u128) / 10000;
+    let edge = if edge > u64::MAX as u128 { u64::MAX } else { edge as u64 };
     gross.checked_sub(edge).unwrap_or(0)
 }
 
@@ -2878,7 +2881,7 @@ fn calculate_crash_point(raw: u32, house_edge_bps: u16) -> u16 {
     let denominator = 10000u128.saturating_sub(normalized_bps);       // 100-10000
     if denominator < 10 { return 10000; } // cap at 100x for edge cases
     let edge_factor = 10000u128 - house_edge_bps as u128;            // e.g. 9900 for 1% edge
-    let result = (edge_factor * 99) / denominator;
+    let result = (edge_factor * 100) / denominator;
     (result.min(10000) as u16).max(100)
 }
 
@@ -4005,8 +4008,11 @@ pub struct SettlePricePrediction<'info> {
     )]
     pub price_prediction: Account<'info, PricePrediction>,
 
-    /// CHECK: Pyth price feed account - owner validated against Pyth program
-    #[account(constraint = *price_feed.owner == PYTH_PROGRAM_ID @ CasinoError::InvalidPriceFeed)]
+    /// CHECK: Pyth price feed account - owner validated against Pyth program, address validated against prediction
+    #[account(
+        constraint = *price_feed.owner == PYTH_PROGRAM_ID @ CasinoError::InvalidPriceFeed,
+        constraint = price_feed.key() == price_prediction.price_feed @ CasinoError::PriceFeedMismatch
+    )]
     pub price_feed: UncheckedAccount<'info>,
 
     /// CHECK: Creator to receive payout - validated against prediction
@@ -4368,6 +4374,7 @@ pub struct PricePrediction {
     pub winner: Pubkey,          // Pubkey::default() if not settled
     pub status: PredictionStatus,
     pub bet_index: u64,
+    pub price_feed: Pubkey,          // Expected Pyth price feed address
     pub bump: u8,
 }
 
@@ -5453,4 +5460,6 @@ pub enum CasinoError {
     LotteryNotDrawn,
     #[msg("Lottery is not cancelled")]
     LotteryNotCancelled,
+    #[msg("Price feed does not match prediction")]
+    PriceFeedMismatch,
 }

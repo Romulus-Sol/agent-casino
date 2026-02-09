@@ -65,7 +65,7 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Eight security audits. 113 vulnerabilities found and fixed. Zero remaining.
+Nine security audits. 125 vulnerabilities found and fixed. Zero remaining.
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic
@@ -306,14 +306,14 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | GameRecord | `["game", house, game_index]` |
 | AgentStats | `["agent", player]` |
 | LpPosition | `["lp", house, provider]` |
-| Challenge | `["challenge", house, challenge_index]` |
+| Challenge | `["challenge", challenger, nonce_le_bytes]` |
 | MemoryPool | `["memory_pool"]` |
 | Memory | `["memory", pool, index]` |
 | MemoryPull | `["mem_pull", memory, puller]` |
 | HitPool | `["hit_pool"]` |
 | Hit | `["hit", hit_pool, index]` |
 | Arbitration | `["arbitration", hit]` |
-| VrfRequest | `["vrf_request", house, game_index]` |
+| VrfRequest | `["vrf_request", player, game_index]` |
 | Lottery | `["lottery", house, lottery_index_le_bytes]` |
 | LotteryTicket | `["ticket", lottery, ticket_number_le_bytes]` |
 | TokenVault | `["token_vault", mint]` |

@@ -2016,13 +2016,22 @@ export class AgentCasino {
     targetPrice: number,
     direction: 'above' | 'below',
     durationSeconds: number,
-    amountSol: number
+    amountSol: number,
+    priceFeedAddress?: string
   ): Promise<{ tx: string; predictionAddress: string }> {
     await this.loadProgram();
     const assetEnum = { [asset.toLowerCase()]: {} };
     const directionEnum = { [direction]: {} };
     const targetPricePyth = new BN(Math.round(targetPrice * 1e8));
     const amount = new BN(amountSol * LAMPORTS_PER_SOL);
+
+    // Default Pyth devnet feeds per asset
+    const PYTH_FEEDS: Record<string, string> = {
+      BTC: 'HovQMDrbAgAYPCmHVSrezcSmkMtXSSUsLDFANExrZh2J',
+      SOL: 'J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix',
+      ETH: 'EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw',
+    };
+    const feedKey = new PublicKey(priceFeedAddress || PYTH_FEEDS[asset]);
 
     const houseAccount = await this.program.account.house.fetch(this.housePda);
     const gameCount = houseAccount.totalGames;
@@ -2033,7 +2042,7 @@ export class AgentCasino {
     );
 
     const tx = await this.program.methods
-      .createPricePrediction(assetEnum, targetPricePyth, directionEnum, new BN(durationSeconds), amount)
+      .createPricePrediction(assetEnum, targetPricePyth, directionEnum, new BN(durationSeconds), amount, feedKey)
       .accounts({
         house: this.housePda,
         pricePrediction: predictionPda,

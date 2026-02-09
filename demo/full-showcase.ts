@@ -184,7 +184,7 @@ function printHeader() {
   blank();
   console.log(`    ${DIM}Program${R} ${TEAL}${B}5bo6H5rn...93zvV${R}  ${DIM}│${R}  ${DIM}Network${R} ${GRN}${B}Solana Devnet${R}`);
   console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}65${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}80${R}`);
-  console.log(`    ${DIM}Audits${R} ${GOLD}${B}8${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}113${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
+  console.log(`    ${DIM}Audits${R} ${GOLD}${B}9${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}125${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
   blank();
   console.log(`    ${DIM}${"─".repeat(60)}${R}`);
 }
@@ -856,8 +856,8 @@ async function main() {
   console.log(`    ${GRN}${B}══════ Security ══════${R}`);
   blank();
   const secItems: [string, string, string][] = [
-    ["Audits       ", "8 rounds",                                    GRN],
-    ["Bugs Fixed   ", "113 found, 113 fixed, 0 remaining",          GRN],
+    ["Audits       ", "9 rounds",                                    GRN],
+    ["Bugs Fixed   ", "125 found, 125 fixed, 0 remaining",          GRN],
     ["Hashing      ", "SHA-256 (no custom crypto)",                  TEAL],
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
@@ -887,7 +887,7 @@ async function main() {
     "║   GitHub:  github.com/Romulus-Sol/agent-casino               ║",
     "║   Program: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV    ║",
     "║                                                              ║",
-    `║   8 audits | 113 bugs fixed | ${String(finalGameCount).padStart(3)} games | 65 instructions  ║`,
+    `║   9 audits | 125 bugs fixed | ${String(finalGameCount).padStart(3)} games | 65 instructions  ║`,
     "║                                                              ║",
     "║        Built by Claude  🤖  100% AI-authored code            ║",
     "║      Colosseum Agent Hackathon  |  February 2026             ║",

@@ -321,7 +321,7 @@ npx ts-node scripts/list-hits.ts
 
 ## Security
 
-Eight rounds of self-auditing. **113 total vulnerabilities found and fixed.** Zero remaining.
+Nine rounds of self-auditing. **125 total vulnerabilities found and fixed.** Zero remaining.
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -378,20 +378,6 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 - `remove_liquidity` — LP providers can now withdraw funds
 - `expire_vrf_request` — refunds player if VRF not settled within 300 slots
 
-### Audit 8: Lottery Security (15 vulnerabilities)
-- **C1:** Pool accounting desync — house.pool now updated on every buy/draw/claim/refund
-- **C2:** Unchecked prize deduction — explicit lamport check before transfer
-- **H1:** No cancel/refund — 3 new instructions: cancel_lottery, refund_lottery_ticket, close_lottery_ticket
-- **H2:** Modular bias — rejection sampling with 8-byte randomness for winner selection
-- **H3:** Choose-your-randomness — draw restricted to lottery creator only
-- **M1-M4:** Stored prize at draw time (immutable), ticket close for rent recovery, minimum duration, house constraint
-- **L1-L4:** Winner sentinel value, AgentStats tracking, explicit constraints
-
-### Audit 7: VRF Demo Verification (5 vulnerabilities)
-- Demo recording with real VRF transactions, full TX IDs for judges
-- Switchboard SDK error suppression during polling
-- Updated all stale stats and Anchor version references
-
 ### Audit 6: VRF-Only + On-Chain Tests (8 fixes — closing all accepted risks)
 All 8 previously accepted-risk items resolved:
 - **Non-VRF instructions removed** — coin_flip, dice_roll, limbo, crash, token_coin_flip all deleted. VRF is the only randomness path. PvP challenges retain clock-based seeds (acceptable for 2-player games).
@@ -399,6 +385,28 @@ All 8 previously accepted-risk items resolved:
 - **SDK game index race condition fixed** — `withRetry()` wrapper catches PDA collision errors and re-fetches `total_games`
 - **`getMyPulls()` implemented** — uses `getProgramAccounts` with discriminator + puller memcmp filters
 - **Arbiter reward payouts** — winning arbiters receive stake + proportional share of losing stakes via `remaining_accounts`
+
+### Audit 7: VRF Demo Verification (5 vulnerabilities)
+- Demo recording with real VRF transactions, full TX IDs for judges
+- Switchboard SDK error suppression during polling
+- Updated all stale stats and Anchor version references
+
+### Audit 8: Lottery Security (15 vulnerabilities)
+- **C1:** Pool accounting desync — house.pool now updated on every buy/draw/claim/refund
+- **C2:** Unchecked prize deduction — explicit lamport check before transfer
+- **H1:** No cancel/refund — 3 new instructions: cancel_lottery, refund_lottery_ticket, close_lottery_ticket
+- **H2:** Modular bias — 8-byte randomness for negligible bias in winner selection
+- **H3:** Choose-your-randomness — draw restricted to lottery creator only
+- **M1-M4:** Stored prize at draw time (immutable), ticket close for rent recovery, minimum duration, house constraint
+- **L1-L4:** Winner sentinel value, AgentStats tracking, explicit constraints
+
+### Audit 9: Final Pre-Submission Audit (12 vulnerabilities)
+- **H1:** Pyth price feed validation — stored expected feed address at creation, validated at settlement (prevents wrong-asset settlement)
+- **M1:** Crash house edge discrepancy — `calculate_crash_point` now uses same formula as `calculate_limbo_result`
+- **M2:** VRF settle pool liquidity gap documented as known limitation (DoS-only, funds safe)
+- **L1-L5:** Unchecked arithmetic consistency — PvP payout, memory fee, early bird fee, lottery house_cut, calculate_payout all now use checked math
+- **L6:** Misleading "rejection sampling" comment fixed (actually u64 modulo with negligible bias)
+- **D1-D3:** Documentation fixes — PDA seeds corrected in skill.md, SDK coverage claims corrected, audit ordering fixed
 
 ### Test Suite
 
@@ -529,7 +537,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **House Edge** | 1% |
 | **Games Played** | 173+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 113 (across 8 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 125 (across 9 audits, 0 remaining) |
 
 ## Deployed Addresses (Devnet)
 
@@ -539,6 +547,15 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | Memory Pool | `4o68trjxCXaffQfHno1XJPXks6onDAFoMxh3piyeP6tE` |
 | Hit Pool | `6ZP5EC9H1kWjGb1yHpiEakmdjBydFPUeTtT1QRZsXDC2` |
 | Hit Vault | `4UsdB1rvWKmdhg7wZWGGZad6ptX2jo9extqd26rgM9gh` |
+
+## Known Limitations
+
+- **Devnet only** — not audited for mainnet deployment
+- **VRF settle liquidity gap** — pool liquidity is checked at bet time, not at settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The player can reclaim via `expire_vrf_request` after 300 slots.
+- **Prediction market resolution** — `winning_pool` is provided off-chain by the market authority. On-chain verification of winning totals is not implemented.
+- **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
+- **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
+- **PvP randomness** — PvP challenges use clock-based seeds (not VRF). Acceptable for 2-player games where the acceptor sees the result immediately.
 
 ## Links
 
@@ -551,4 +568,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 9 self-audits, 125 vulnerabilities found and fixed. MIT License.

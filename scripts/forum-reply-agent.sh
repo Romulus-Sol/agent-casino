@@ -280,6 +280,19 @@ REPLY RULES:
     echo "$reply"
 }
 
+# Validate that a reply is a genuine forum comment and not an error/rate-limit message
+# Returns 0 (true) if reply looks bad, 1 (false) if reply looks OK
+is_bad_reply() {
+    local reply="$1"
+    # Too short
+    [ ${#reply} -lt 15 ] && return 0
+    # Claude CLI error / rate limit messages
+    echo "$reply" | grep -qiE "out of.*(usage|credit|quota)|resets [0-9]|rate.limit|too many request|usage.limit|Invalid API|API key|unauthorized|forbidden|exceeded|capacity|overloaded|try again later|503|429|error code" && return 0
+    # Claude meta-output (not a reply)
+    echo "$reply" | grep -qiE "^I (cannot|can't|am unable|don't have)" && return 0
+    return 1
+}
+
 # Track agents we've replied to per post THIS RUN (prevents triple-reply to same agent)
 declare -A REPLIED_THIS_RUN  # key: "postId:agentNameLower" → 1
 
@@ -405,7 +418,7 @@ Our post is about Agent Casino. Generate a friendly, substantive reply. Start wi
         fi
 
         # Final sanity check
-        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+        if is_bad_reply "$REPLY"; then
             log "  WARNING: Reply looks like an error message, skipping"
             continue
         fi
@@ -529,7 +542,7 @@ Lead with genuine interest in THEIR project. Ask a real question or share a rele
             REPLY="@$POST_AGENT_NAME — $REPLY"
         fi
 
-        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+        if is_bad_reply "$REPLY"; then
             log "  WARNING: Reply looks bad, skipping"
             continue
         fi
@@ -644,7 +657,7 @@ Lead with genuine interest in THEIR project. Ask a real question or share a rele
         fi
 
         # Final sanity check
-        if [ ${#REPLY} -lt 15 ] || echo "$REPLY" | grep -qi "Invalid API\|error\|API key"; then
+        if is_bad_reply "$REPLY"; then
             log "  WARNING: Reply looks like an error message, skipping"
             continue
         fi

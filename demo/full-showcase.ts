@@ -60,13 +60,14 @@ const SEC_COLORS = [
   { bg: "\x1b[48;5;130m", fg: ORANGE },  // 4  dice
   { bg: "\x1b[48;5;53m",  fg: MAG },     // 5  limbo
   { bg: "\x1b[48;5;124m", fg: CORAL },   // 6  crash
-  { bg: "\x1b[48;5;94m",  fg: GOLD },    // 7  pvp
-  { bg: "\x1b[48;5;30m",  fg: TEAL },    // 8  memory
-  { bg: "\x1b[48;5;88m",  fg: RED },     // 9  hitman
-  { bg: "\x1b[48;5;22m",  fg: GRN },     // 10 prediction
-  { bg: "\x1b[48;5;17m",  fg: BLU },     // 11 wargames
-  { bg: "\x1b[48;5;54m",  fg: PINK },    // 12 integrations
-  { bg: "\x1b[48;5;22m",  fg: GOLD },    // 13 final
+  { bg: "\x1b[48;5;54m",  fg: PINK },    // 7  lottery
+  { bg: "\x1b[48;5;94m",  fg: GOLD },    // 8  pvp
+  { bg: "\x1b[48;5;30m",  fg: TEAL },    // 9  memory
+  { bg: "\x1b[48;5;88m",  fg: RED },     // 10 hitman
+  { bg: "\x1b[48;5;22m",  fg: GRN },     // 11 prediction
+  { bg: "\x1b[48;5;17m",  fg: BLU },     // 12 wargames
+  { bg: "\x1b[48;5;54m",  fg: PINK },    // 13 integrations
+  { bg: "\x1b[48;5;22m",  fg: GOLD },    // 14 final
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -182,11 +183,17 @@ function printHeader() {
   console.log(`    ${PURPLE}${B}Built by an AI Agent${R}  ${DIM}🤖${R}  ${CYN}${B}For AI Agents${R}`);
   blank();
   console.log(`    ${DIM}Program${R} ${TEAL}${B}5bo6H5rn...93zvV${R}  ${DIM}│${R}  ${DIM}Network${R} ${GRN}${B}Solana Devnet${R}`);
-  console.log(`    ${DIM}Games${R} ${GOLD}${B}4${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}SDK${R} ${CYN}${B}42+ methods${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}80${R}`);
-  console.log(`    ${DIM}Audits${R} ${GOLD}${B}7${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}98${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
+  console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}65${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}80${R}`);
+  console.log(`    ${DIM}Audits${R} ${GOLD}${B}8${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}113${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
   blank();
   console.log(`    ${DIM}${"─".repeat(60)}${R}`);
 }
+
+// Dynamic stats (fetched from on-chain at runtime)
+let liveGameCount = 0;
+let livePool = 0;
+let liveVolume = 0;
+let livePayout = 0;
 
 // ── Main Demo ────────────────────────────────────────────────────────
 async function main() {
@@ -198,6 +205,16 @@ async function main() {
   const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
   const { keypair, address } = loadWallet();
   const casino = new AgentCasino(connection, keypair);
+
+  // Fetch live stats for dynamic display throughout the demo
+  try {
+    const liveHouse = await casino.getHouseStats();
+    liveGameCount = liveHouse.totalGames;
+    livePool = liveHouse.pool;
+    liveVolume = liveHouse.totalVolume;
+    livePayout = liveHouse.totalPayout;
+  } catch {}
+  console.log(`    ${DIM}Live stats:${R} ${GOLD}${B}${liveGameCount}${R} ${DIM}games played${R}  ${DIM}│${R}  ${GOLD}${B}${sol(livePool)}${R} ${DIM}SOL pool${R}`);
 
   // Setup Switchboard VRF
   const wallet = new anchor.Wallet(keypair);
@@ -518,9 +535,52 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 7: PvP CHALLENGE
+  // SECTION 7: LOTTERY POOL
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(7, "PvP Challenge  (Agent vs Agent)", "⚔️");
+  sectionHeader(7, "Lottery Pool  (VRF-Drawn Winner)", "🎰");
+  console.log(`    ${DIM}On-chain lottery. Buy tickets, draw random winner via Switchboard VRF.${R}`);
+  console.log(`    ${DIM}8 instructions: create, buy, draw, claim, cancel, refund, close×2${R}`);
+  await spinner("Creating lottery on-chain...", 1500);
+
+  try {
+    // Get current slot for end time
+    const currentSlot = await connection.getSlot();
+    const endSlot = currentSlot + 200; // ~80s from now (short for demo)
+
+    const lottery = await casino.createLottery(0.001, 5, endSlot);
+    blank();
+    console.log(`    ${BGPURP}${B}${WHT}  LOTTERY CREATED  ${R}`);
+    blank();
+    statLine("Lottery PDA    ", `${TEAL}${B}${lottery.lotteryAddress}${R}`);
+    statLine("Ticket Price   ", `${GOLD}${B}0.0010 SOL${R}`);
+    statLine("Max Tickets    ", `${CYN}${B}5${R}`);
+    statLine("End Slot       ", `${WHT}${B}${endSlot}${R} ${DIM}(current: ${currentSlot})${R}`);
+    statLine("TX             ", `${TEAL}${lottery.tx}${R}`);
+
+    // Buy 2 tickets
+    blank();
+    await spinner("Buying lottery tickets...", 1000);
+    const ticket1 = await casino.buyLotteryTicket(lottery.lotteryAddress);
+    console.log(`    ${GRN}${B}✓${R} Ticket #${ticket1.ticketNumber} purchased ${DIM}(TX: ${ticket1.tx.slice(0, 12)}...)${R}`);
+    const ticket2 = await casino.buyLotteryTicket(lottery.lotteryAddress);
+    console.log(`    ${GRN}${B}✓${R} Ticket #${ticket2.ticketNumber} purchased ${DIM}(TX: ${ticket2.tx.slice(0, 12)}...)${R}`);
+
+    // Show lottery info
+    const info = await casino.getLotteryInfo(lottery.lotteryAddress);
+    blank();
+    console.log(`    ${DIM}Pool:${R} ${GOLD}${B}${info.totalPool.toFixed(4)} SOL${R}  ${DIM}│${R}  ${DIM}Tickets:${R} ${GRN}${B}${info.ticketsSold}/${info.maxTickets}${R}  ${DIM}│${R}  ${DIM}Status:${R} ${LIME}${B}${info.status}${R}`);
+    blank();
+    console.log(`    ${DIM}Security: creator-only draw, rejection sampling, stored prize,${R}`);
+    console.log(`    ${DIM}cancel/refund flow, pool accounting sync (Audit 8: 15 fixes)${R}`);
+  } catch (err: any) {
+    console.log(`    ${RED}Lottery demo failed: ${err.message}${R}`);
+  }
+  await sleep(2000);
+
+  // ══════════════════════════════════════════════════════════════
+  // SECTION 8: PvP CHALLENGE
+  // ══════════════════════════════════════════════════════════════
+  sectionHeader(8, "PvP Challenge  (Agent vs Agent)", "⚔️");
   console.log(`    ${DIM}Create a coin flip challenge. Another agent matches your bet.${R}`);
   await spinner("Creating PvP challenge on-chain...", 1500);
 
@@ -543,9 +603,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 8: MEMORY SLOTS
+  // SECTION 9: MEMORY SLOTS
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(8, "Memory Slots  (Knowledge Marketplace)", "🧠");
+  sectionHeader(9, "Memory Slots  (Knowledge Marketplace)", "🧠");
   console.log(`    ${DIM}Agents stake knowledge. Others pay to pull random memories. Rate 1-5.${R}`);
   await spinner("Loading memory pool...", 1500);
 
@@ -587,9 +647,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 9: HITMAN MARKET
+  // SECTION 10: HITMAN MARKET
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(9, "Hitman Market  (Bounties on Agent Behavior)", "🎯");
+  sectionHeader(10, "Hitman Market  (Bounties on Agent Behavior)", "🎯");
   console.log(`    ${DIM}Post bounties. Hunters stake 10%+ to claim. Arbitration for disputes.${R}`);
   await spinner("Loading hitman market...", 1500);
 
@@ -631,9 +691,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 10: PRICE PREDICTION (Pyth Oracle)
+  // SECTION 11: PRICE PREDICTION (Pyth Oracle)
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(10, "Price Prediction  (Pyth Oracle)", "📈");
+  sectionHeader(11, "Price Prediction  (Pyth Oracle)", "📈");
   console.log(`    ${DIM}Bet on BTC/SOL/ETH price movements. Settled by Pyth oracle on-chain.${R}`);
   await spinner("Creating BTC price prediction...", 1500);
 
@@ -659,9 +719,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 11: WARGAMES RISK INTEGRATION
+  // SECTION 12: WARGAMES RISK INTEGRATION
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(11, "WARGAMES Risk-Adjusted Betting", "📊");
+  sectionHeader(12, "WARGAMES Risk-Adjusted Betting", "📊");
   console.log(`    ${DIM}Real-time macro conditions scale bet sizes per-game automatically${R}`);
   await spinner("Fetching market sentiment from WARGAMES oracle...", 2000);
 
@@ -713,9 +773,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 12: SDK & INTEGRATION OVERVIEW
+  // SECTION 13: SDK & INTEGRATION OVERVIEW
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(12, "Three Ways to Play", "📦");
+  sectionHeader(13, "Three Ways to Play", "📦");
   blank();
 
   // Method 1 - SDK
@@ -740,7 +800,8 @@ async function main() {
 
   const features: [string, string, string][] = [
     ["4 House Games     ", "Coin Flip, Dice Roll, Limbo, Crash", LIME],
-    ["Switchboard VRF   ", "Provably unpredictable randomness for all 4 games", PURPLE],
+    ["Lottery Pool      ", "VRF-drawn winners, cancel/refund, 8 instructions", MAG],
+    ["Switchboard VRF   ", "Provably unpredictable randomness for all games + lottery", PURPLE],
     ["SPL Token Vaults  ", "Play with any SPL token, not just SOL", GOLD],
     ["PvP Challenges    ", "Agent-vs-agent coin flip with on-chain escrow", ORANGE],
     ["Memory Slots      ", "Knowledge marketplace — stake, pull, rate", TEAL],
@@ -757,9 +818,9 @@ async function main() {
   await sleep(2000);
 
   // ══════════════════════════════════════════════════════════════
-  // SECTION 13: FINAL STATS
+  // SECTION 14: FINAL STATS
   // ══════════════════════════════════════════════════════════════
-  sectionHeader(13, "Final Stats", "🏆");
+  sectionHeader(14, "Final Stats", "🏆");
   await spinner("Compiling final statistics...", 1500);
 
   try {
@@ -795,15 +856,15 @@ async function main() {
   console.log(`    ${GRN}${B}══════ Security ══════${R}`);
   blank();
   const secItems: [string, string, string][] = [
-    ["Audits       ", "7 rounds",                                    GRN],
-    ["Bugs Fixed   ", "98 found, 98 fixed, 0 remaining",            GRN],
+    ["Audits       ", "8 rounds",                                    GRN],
+    ["Bugs Fixed   ", "113 found, 113 fixed, 0 remaining",          GRN],
     ["Hashing      ", "SHA-256 (no custom crypto)",                  TEAL],
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
-    ["Rent Recovery", "9 close instructions for settled accounts",   BLU],
-    ["Test Suite   ", "80 passing (69 SDK + 11 on-chain)",                                  LIME],
-    ["SDK Coverage ", "100% (42+ instructions)",                     GOLD],
-    ["VRF Support  ", "VRF-only — all games use Switchboard",                   ORANGE],
+    ["Rent Recovery", "12 close instructions for settled accounts",  BLU],
+    ["Test Suite   ", "80 passing (69 SDK + 11 on-chain)",           LIME],
+    ["Instructions ", "65 on-chain (VRF games, lottery, PvP, memory, hitman, predictions)", GOLD],
+    ["VRF Support  ", "VRF-only — all games + lottery use Switchboard", ORANGE],
   ];
   for (const [label, value, color] of secItems) {
     console.log(`    ${color}${B}✓${R} ${DIM}${label}${R}  ${color}${B}${value}${R}`);
@@ -811,6 +872,13 @@ async function main() {
 
   // ── Closing — gradient box ────────────────────────────────────
   blank();
+  // Re-fetch final game count (may have increased during demo)
+  let finalGameCount = liveGameCount;
+  try {
+    const fh = await casino.getHouseStats();
+    finalGameCount = fh.totalGames;
+  } catch {}
+
   const closingLines = [
     "╔══════════════════════════════════════════════════════════════╗",
     "║                                                              ║",
@@ -819,7 +887,7 @@ async function main() {
     "║   GitHub:  github.com/Romulus-Sol/agent-casino               ║",
     "║   Program: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV    ║",
     "║                                                              ║",
-    "║     7 audits  |  98 bugs fixed  |  80 tests  |  0 remaining ║",
+    `║   8 audits | 113 bugs fixed | ${String(finalGameCount).padStart(3)} games | 65 instructions  ║`,
     "║                                                              ║",
     "║        Built by Claude  🤖  100% AI-authored code            ║",
     "║      Colosseum Agent Hackathon  |  February 2026             ║",

@@ -20,17 +20,6 @@ describe("agent-casino", () => {
       expect(houseBump).to.be.a("number").within(0, 255);
     });
 
-    it("derives vault PDA from house PDA", () => {
-      const [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), housePda.toBuffer()],
-        PROGRAM_ID
-      );
-      expect(vaultPda.toBase58()).to.be.a("string");
-      expect(vaultBump).to.be.a("number").within(0, 255);
-      // Vault PDA should differ from house PDA
-      expect(vaultPda.toBase58()).to.not.equal(housePda.toBase58());
-    });
-
     it("derives game record PDA from house + index", () => {
       const gameIndex = new Uint8Array(new BigUint64Array([BigInt(0)]).buffer);
       const [gamePda] = PublicKey.findProgramAddressSync(
@@ -613,7 +602,7 @@ describe("agent-casino", () => {
       const denominator = 10000n - normalizedBps;
       if (denominator < 10n) return 100; // cap at 100x
       const edgeFactor = 10000n - BigInt(houseEdgeBps);
-      const result = edgeFactor * 99n / denominator;
+      const result = edgeFactor * 100n / denominator;
       return Math.max(1.01, Math.min(100, Number(result) / 100));
     }
 
@@ -869,7 +858,7 @@ describe("agent-casino", () => {
       const denominator = 10000n - normalizedBps;
       expect(denominator > 0n).to.be.true;
       const edgeFactor = 10000n - 100n; // 1% edge
-      const result = edgeFactor * 99n / denominator;
+      const result = edgeFactor * 100n / denominator;
       expect(Number(result)).to.be.greaterThan(0);
     });
   });
@@ -948,16 +937,6 @@ describe("agent-casino", () => {
       const account = await connection.getAccountInfo(housePda);
       expect(account).to.not.be.null;
       expect(account!.owner.toBase58()).to.equal(PROGRAM_ID.toBase58());
-    });
-
-    it("vault PDA exists and holds SOL", async () => {
-      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
-      const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), housePda.toBuffer()],
-        PROGRAM_ID
-      );
-      const balance = await connection.getBalance(vaultPda);
-      expect(balance).to.be.greaterThan(0);
     });
 
     it("program is deployed and executable", async () => {

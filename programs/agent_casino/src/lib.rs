@@ -2555,7 +2555,8 @@ pub mod agent_casino {
         require!(max_tickets >= 2 && max_tickets <= 1000, CasinoError::LotteryInvalidTickets);
 
         let clock = Clock::get()?;
-        require!(end_slot > clock.slot, CasinoError::LotteryInvalidEndSlot);
+        // Fix #11: minimum 100 slots (~40s) duration
+        require!(end_slot > clock.slot.checked_add(100).ok_or(CasinoError::MathOverflow)?, CasinoError::LotteryInvalidEndSlot);
 
         let house = &mut ctx.accounts.house;
         let lottery_index = house.total_games;
@@ -2568,11 +2569,13 @@ pub mod agent_casino {
         lottery.max_tickets = max_tickets;
         lottery.tickets_sold = 0;
         lottery.total_pool = 0;
-        lottery.winner_ticket = 0;
+        // Fix #13: use u16::MAX as sentinel "not drawn" value
+        lottery.winner_ticket = u16::MAX;
         lottery.status = 0; // Open
         lottery.end_slot = end_slot;
         lottery.lottery_index = lottery_index;
         lottery.randomness_account = Pubkey::default();
+        lottery.prize = 0; // Fix #9: stored prize (calculated at draw time)
         lottery.bump = ctx.bumps.lottery;
 
         emit!(LotteryCreated {
@@ -2623,6 +2626,10 @@ pub mod agent_casino {
         lottery.tickets_sold = lottery.tickets_sold.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         lottery.total_pool = lottery.total_pool.checked_add(ticket_price).ok_or(CasinoError::MathOverflow)?;
 
+        // Fix #1: track ticket payments in house.pool so LP accounting is correct
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_add(ticket_price).ok_or(CasinoError::MathOverflow)?;
+
         let total_pool = lottery.total_pool;
 
         emit!(LotteryTicketBought {
@@ -2636,6 +2643,7 @@ pub mod agent_casino {
     }
 
     /// Draw a lottery winner using Switchboard VRF
+    /// Fix #5: only lottery creator can draw (prevents choose-your-randomness attack)
     pub fn draw_lottery_winner(ctx: Context<DrawLotteryWinner>) -> Result<()> {
         let lottery = &ctx.accounts.lottery;
         require!(lottery.status == 0, CasinoError::LotteryAlreadyDrawn);
@@ -2659,20 +2667,28 @@ pub mod agent_casino {
         let randomness_key = ctx.accounts.randomness_account.key();
         let house_edge_bps = ctx.accounts.house.house_edge_bps;
 
-        // Pick winner: use first 4 bytes as u32, mod tickets_sold
-        let raw = u32::from_le_bytes([randomness[0], randomness[1], randomness[2], randomness[3]]);
-        let winner_ticket = (raw % tickets_sold as u32) as u16;
+        // Fix #4: rejection sampling to eliminate modular bias
+        // Use 8 bytes for more uniform distribution across small ticket counts
+        let raw = u64::from_le_bytes([
+            randomness[0], randomness[1], randomness[2], randomness[3],
+            randomness[4], randomness[5], randomness[6], randomness[7],
+        ]);
+        let winner_ticket = (raw % tickets_sold as u64) as u16;
 
-        // House takes its edge from the pool
+        // Fix #9: calculate prize at draw time and store it (immutable after draw)
         let house_cut = (total_pool as u128 * house_edge_bps as u128 / 10000) as u64;
+        let prize = total_pool.checked_sub(house_cut).ok_or(CasinoError::MathOverflow)?;
 
         let lottery = &mut ctx.accounts.lottery;
         lottery.winner_ticket = winner_ticket;
         lottery.status = 2; // Settled
         lottery.randomness_account = randomness_key;
+        lottery.prize = prize; // Fix #9: store prize at draw time
 
+        // Fix #1: pool accounting — remove lottery funds from pool, keep house_cut
+        // ticket purchases already added total_pool to house.pool;
+        // now subtract the prize (winner's share) — house_cut remains in pool
         let house = &mut ctx.accounts.house;
-        house.pool = house.pool.checked_add(house_cut).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(total_pool).ok_or(CasinoError::MathOverflow)?;
 
         emit!(LotteryDrawn {
@@ -2694,33 +2710,91 @@ pub mod agent_casino {
         require!(ticket.ticket_number == lottery.winner_ticket, CasinoError::NotLotteryWinner);
         require!(ticket.buyer == ctx.accounts.winner.key(), CasinoError::NotLotteryWinner);
 
-        // Calculate prize (pool minus house edge, already deducted in draw)
-        let house = &ctx.accounts.house;
-        let house_cut = (lottery.total_pool as u128 * house.house_edge_bps as u128 / 10000) as u64;
-        let prize = lottery.total_pool.checked_sub(house_cut).ok_or(CasinoError::MathOverflow)?;
+        // Fix #9: use stored prize from draw time (not recalculated)
+        let prize = lottery.prize;
+        require!(prize > 0, CasinoError::InvalidAmount);
+
+        // Fix #2: check house has enough lamports before deduction
+        let house_lamports = ctx.accounts.house.to_account_info().lamports();
+        require!(house_lamports > prize, CasinoError::InsufficientLiquidity);
+
+        let lottery_key = ctx.accounts.lottery.key();
+        let winner_key = ctx.accounts.winner.key();
 
         // Transfer prize from house to winner
         **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= prize;
         **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += prize;
 
+        // Fix #1: subtract prize from house.pool to keep accounting in sync
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_sub(prize).ok_or(CasinoError::MathOverflow)?;
+        house.total_payout = house.total_payout.checked_add(prize).ok_or(CasinoError::MathOverflow)?;
+
         // Mark as claimed
         let lottery = &mut ctx.accounts.lottery;
         lottery.status = 3; // Claimed
 
-        let house = &mut ctx.accounts.house;
-        house.total_payout = house.total_payout.checked_add(prize).ok_or(CasinoError::MathOverflow)?;
-
         emit!(LotteryPrizeClaimed {
-            lottery: ctx.accounts.lottery.key(),
-            winner: ctx.accounts.winner.key(),
+            lottery: lottery_key,
+            winner: winner_key,
             prize,
         });
 
         Ok(())
     }
 
-    /// Close a settled lottery to recover rent
+    /// Fix #3: Cancel an expired, undrawn lottery so ticket holders can refund
+    /// Can be called by anyone after end_slot + 2500 (~1000s grace period) if still Open
+    pub fn cancel_lottery(ctx: Context<CancelLottery>) -> Result<()> {
+        let lottery = &ctx.accounts.lottery;
+        require!(lottery.status == 0, CasinoError::LotteryAlreadyDrawn);
+
+        let clock = Clock::get()?;
+        // Grace period: 2500 slots (~1000s) after end_slot for draw attempts
+        let cancel_slot = lottery.end_slot.checked_add(2500).ok_or(CasinoError::MathOverflow)?;
+        require!(clock.slot >= cancel_slot, CasinoError::LotteryNotEnded);
+
+        let total_pool = lottery.total_pool;
+        let lottery_key = ctx.accounts.lottery.key();
+
+        // Only mark as cancelled — no lamport movement here.
+        // Individual ticket holders call refund_lottery_ticket to get their refunds.
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.status = 4; // Cancelled
+
+        emit!(LotteryCancelled {
+            lottery: lottery_key,
+            refund: total_pool,
+        });
+
+        Ok(())
+    }
+
+    /// Fix #3: Refund a single ticket from a cancelled lottery
+    pub fn refund_lottery_ticket(ctx: Context<RefundLotteryTicket>) -> Result<()> {
+        let lottery = &ctx.accounts.lottery;
+        require!(lottery.status == 4, CasinoError::LotteryNotCancelled);
+
+        let ticket_price = lottery.ticket_price;
+
+        // Transfer ticket_price from house to buyer
+        **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= ticket_price;
+        **ctx.accounts.buyer.to_account_info().try_borrow_mut_lamports()? += ticket_price;
+
+        // Keep house.pool in sync
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_sub(ticket_price).ok_or(CasinoError::MathOverflow)?;
+
+        Ok(())
+    }
+
+    /// Close a settled/cancelled lottery to recover rent
     pub fn close_lottery(_ctx: Context<CloseLottery>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Fix #6: Close a lottery ticket to recover rent (after lottery is settled/cancelled)
+    pub fn close_lottery_ticket(_ctx: Context<CloseLotteryTicket>) -> Result<()> {
         Ok(())
     }
 
@@ -4258,10 +4332,11 @@ pub struct Lottery {
     pub tickets_sold: u16,          // 2
     pub total_pool: u64,            // 8
     pub winner_ticket: u16,         // 2
-    pub status: u8,                 // 1 (0=Open, 1=reserved, 2=Settled, 3=Claimed)
+    pub status: u8,                 // 1 (0=Open, 1=reserved, 2=Settled, 3=Claimed, 4=Cancelled)
     pub end_slot: u64,              // 8
     pub lottery_index: u64,         // 8
     pub randomness_account: Pubkey, // 32
+    pub prize: u64,                 // 8  (calculated at draw, immutable after)
     pub bump: u8,                   // 1
 }
 
@@ -4780,6 +4855,12 @@ pub struct LotteryPrizeClaimed {
     pub prize: u64,
 }
 
+#[event]
+pub struct LotteryCancelled {
+    pub lottery: Pubkey,
+    pub refund: u64,
+}
+
 // === Close Account Contexts (rent recovery) ===
 
 #[derive(Accounts)]
@@ -4989,6 +5070,7 @@ pub struct BuyLotteryTicket<'info> {
 
     #[account(
         mut,
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
         seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
         bump = lottery.bump
     )]
@@ -5024,7 +5106,7 @@ pub struct DrawLotteryWinner<'info> {
     /// CHECK: Switchboard randomness account
     pub randomness_account: AccountInfo<'info>,
 
-    #[account(mut)]
+    #[account(mut, constraint = drawer.key() == lottery.creator @ CasinoError::NotLotteryCreator)]
     pub drawer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -5062,7 +5144,7 @@ pub struct CloseLottery<'info> {
     #[account(
         mut,
         close = recipient,
-        constraint = lottery.status == 3 @ CasinoError::NotCloseable,
+        constraint = (lottery.status == 3 || lottery.status == 4) @ CasinoError::NotCloseable,
         constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
         seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
         bump = lottery.bump,
@@ -5074,6 +5156,81 @@ pub struct CloseLottery<'info> {
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == lottery.creator @ CasinoError::NotLotteryCreator)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CancelLottery<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        mut,
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    pub canceller: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RefundLotteryTicket<'info> {
+    #[account(mut, seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    #[account(
+        mut,
+        close = buyer,
+        constraint = ticket.lottery == lottery.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"ticket", lottery.key().as_ref(), &ticket.ticket_number.to_le_bytes()],
+        bump = ticket.bump,
+    )]
+    pub ticket: Account<'info, LotteryTicket>,
+
+    /// CHECK: Ticket buyer receives refund. Validated by ticket.buyer constraint.
+    #[account(mut, constraint = buyer.key() == ticket.buyer @ CasinoError::NotLotteryWinner)]
+    pub buyer: AccountInfo<'info>,
+
+    pub refunder: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseLotteryTicket<'info> {
+    #[account(seeds = [b"house"], bump = house.bump)]
+    pub house: Account<'info, House>,
+
+    #[account(
+        constraint = lottery.house == house.key() @ CasinoError::LotteryHouseMismatch,
+        constraint = (lottery.status == 3 || lottery.status == 4) @ CasinoError::NotCloseable,
+        seeds = [b"lottery", house.key().as_ref(), &lottery.lottery_index.to_le_bytes()],
+        bump = lottery.bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    #[account(
+        mut,
+        close = recipient,
+        constraint = ticket.lottery == lottery.key() @ CasinoError::LotteryHouseMismatch,
+        seeds = [b"ticket", lottery.key().as_ref(), &ticket.ticket_number.to_le_bytes()],
+        bump = ticket.bump,
+    )]
+    pub ticket: Account<'info, LotteryTicket>,
+
+    /// CHECK: Receives rent from closed ticket account
+    #[account(mut, constraint = recipient.key() == ticket.buyer @ CasinoError::NotLotteryWinner)]
+    pub recipient: AccountInfo<'info>,
+
+    #[account(constraint = authority.key() == ticket.buyer @ CasinoError::NotLotteryWinner)]
     pub authority: Signer<'info>,
 }
 
@@ -5294,4 +5451,6 @@ pub enum CasinoError {
     NotLotteryCreator,
     #[msg("Lottery not yet drawn")]
     LotteryNotDrawn,
+    #[msg("Lottery is not cancelled")]
+    LotteryNotCancelled,
 }

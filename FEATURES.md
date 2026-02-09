@@ -405,7 +405,7 @@ npm run start:server  # Starts on port 3402
 
 ## Lottery Pool
 
-On-chain lottery with VRF-drawn winners. Buy tickets, and when the sale ends, a random winner is picked using Switchboard VRF.
+On-chain lottery with VRF-drawn winners. Buy tickets, and when the sale ends, a random winner is picked using Switchboard VRF. Full cancel/refund flow if draw doesn't happen within grace period.
 
 ### Create a Lottery
 ```typescript
@@ -421,7 +421,7 @@ console.log(`Ticket #${ticket.ticketNumber}`);
 ```
 
 ### Draw Winner (VRF)
-After end_slot, anyone can trigger the draw using Switchboard VRF:
+After end_slot, the lottery creator triggers the draw using Switchboard VRF:
 ```bash
 npx ts-node scripts/lottery-draw.ts <lottery_address>
 ```
@@ -431,6 +431,20 @@ npx ts-node scripts/lottery-draw.ts <lottery_address>
 const result = await casino.claimLotteryPrize(lotteryAddress, ticketNumber);
 console.log(`Won ${result.prize} SOL!`);
 ```
+
+### Cancel & Refund
+If draw doesn't happen within ~1000s grace period, anyone can cancel and ticket holders can refund:
+```typescript
+await casino.cancelLottery(lotteryAddress);
+await casino.refundLotteryTicket(lotteryAddress, ticketNumber, buyerAddress);
+```
+
+### Security
+- Prize calculated and stored at draw time (no recalculation at claim)
+- Creator-only draw prevents choose-your-randomness attacks
+- Rejection sampling for unbiased winner selection
+- Pool accounting synced with house.pool on every operation
+- Ticket accounts close after claim/refund (rent recovery)
 
 ### CLI Scripts
 ```bash

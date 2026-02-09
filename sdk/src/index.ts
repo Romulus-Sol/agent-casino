@@ -2361,10 +2361,7 @@ export class AgentCasino {
     );
 
     const lottery = await this.program.account.lottery.fetch(lotteryPda);
-    const houseAccount = await this.program.account.house.fetch(this.housePda);
-    const totalPool = (lottery as any).totalPool.toNumber();
-    const houseEdge = (houseAccount as any).houseEdgeBps;
-    const prize = totalPool - Math.floor(totalPool * houseEdge / 10000);
+    const prize = (lottery as any).prize.toNumber();
 
     const tx = await this.program.methods
       .claimLotteryPrize()
@@ -2378,6 +2375,46 @@ export class AgentCasino {
       .rpc();
 
     return { tx, prize: prize / LAMPORTS_PER_SOL };
+  }
+
+  async cancelLottery(lotteryAddress: string): Promise<{ tx: string }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+
+    const tx = await this.program.methods
+      .cancelLottery()
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        canceller: this.wallet.publicKey,
+      })
+      .rpc();
+
+    return { tx };
+  }
+
+  async refundLotteryTicket(lotteryAddress: string, ticketNumber: number, buyerAddress: string): Promise<{ tx: string }> {
+    await this.loadProgram();
+    const lotteryPda = new PublicKey(lotteryAddress);
+
+    const [ticketPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ticket"), lotteryPda.toBuffer(), new BN(ticketNumber).toArrayLike(Buffer, "le", 2)],
+      PROGRAM_ID
+    );
+
+    const tx = await this.program.methods
+      .refundLotteryTicket()
+      .accounts({
+        house: this.housePda,
+        lottery: lotteryPda,
+        ticket: ticketPda,
+        buyer: new PublicKey(buyerAddress),
+        refunder: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    return { tx };
   }
 
   /**
@@ -2395,13 +2432,14 @@ export class AgentCasino {
     status: string;
     endSlot: number;
     lotteryIndex: number;
+    prize: number;
   }> {
     await this.loadProgram();
     const lotteryPda = new PublicKey(lotteryAddress);
     const lottery = await this.program.account.lottery.fetch(lotteryPda);
     const l = lottery as any;
 
-    const statusMap: Record<number, string> = { 0: 'Open', 1: 'Drawing', 2: 'Settled', 3: 'Claimed' };
+    const statusMap: Record<number, string> = { 0: 'Open', 1: 'Drawing', 2: 'Settled', 3: 'Claimed', 4: 'Cancelled' };
 
     return {
       address: lotteryAddress,
@@ -2414,6 +2452,7 @@ export class AgentCasino {
       status: statusMap[l.status] || 'Unknown',
       endSlot: l.endSlot.toNumber(),
       lotteryIndex: l.lotteryIndex.toNumber(),
+      prize: l.prize.toNumber() / LAMPORTS_PER_SOL,
     };
   }
 

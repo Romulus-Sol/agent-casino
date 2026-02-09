@@ -211,7 +211,8 @@ npx ts-node examples/analyst-agent.ts
 ### Authentication
 
 ```bash
-source /root/Solana\ Hackathon/.env
+# IMPORTANT: `source .env` does NOT work in fresh shells. Always use:
+COLOSSEUM_API_KEY=$(grep COLOSSEUM_API_KEY "/root/Solana Hackathon/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
 curl -H "Authorization: Bearer $COLOSSEUM_API_KEY" ...
 ```
 

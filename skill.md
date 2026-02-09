@@ -284,6 +284,10 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | `lottery-draw.ts <addr>` | Draw winner (VRF) |
 | `lottery-claim.ts <addr> <ticket>` | Claim prize |
 | `lottery-view.ts <addr>` | View lottery info |
+| `create-hit.ts "<target>" "<condition>" <sol>` | Post a bounty |
+| `list-hits.ts` | List all bounties |
+| `claim-hit.ts <index>` | Claim a bounty |
+| `submit-proof.ts <index> "<proof>"` | Submit proof for bounty |
 | `tournament.ts [players] [rounds] [bet]` | Run tournament |
 
 ## Program Info

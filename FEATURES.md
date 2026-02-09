@@ -243,6 +243,8 @@ const hits = await hitman.getHits("open");
 ```bash
 npx ts-node scripts/create-hit.ts "<TARGET>" "<CONDITION>" <BOUNTY_SOL> [anonymous]
 npx ts-node scripts/list-hits.ts [status_filter]
+npx ts-node scripts/claim-hit.ts <HIT_INDEX>
+npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 npx ts-node scripts/init-hitpool.ts
 ```
 

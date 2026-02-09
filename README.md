@@ -315,6 +315,8 @@ Post bounties to incentivize specific agent actions. Social engineering meets on
 ```bash
 npx ts-node scripts/create-hit.ts "<TARGET>" "<CONDITION>" <BOUNTY_SOL>
 npx ts-node scripts/list-hits.ts
+npx ts-node scripts/claim-hit.ts <HIT_INDEX>
+npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 ```
 
 ---

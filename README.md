@@ -535,9 +535,9 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **Program ID** | `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV` |
 | **Network** | Solana Devnet |
 | **Framework** | Anchor 0.32.1 |
-| **House Pool** | ~10 SOL |
+| **House Pool** | ~10.4 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 188+ |
+| **Games Played** | 338+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
 | **Vulnerabilities Fixed** | 125 (across 9 audits, 0 remaining) |
 

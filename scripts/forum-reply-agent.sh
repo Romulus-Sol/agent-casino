@@ -58,7 +58,7 @@ INTEGRATION_KEYWORDS="integrat|collaborat|collab|SDK|use your|our.*your|partner|
 #   HTTP/payments: x402, payment gate, HTTP API, pay per call, micropayment, REST API
 #   Tokens/swap: SPL token, multi-token, Jupiter, swap, any token
 #   Composability: CPI, cross-program, composab, interop, protocol, plug-in
-OUTREACH_KEYWORDS="casino|gambl|betting|wager|dice|coin.?flip|slot.?machine|lottery|raffle|tournament|arena|PvP|duel|versus|compete|challenge|leaderboard|provably.fair|house.edge|VRF|randomness|random.number|verifiable.random|switchboard|fair.*outcome|DeFi.*game|game.*DeFi|on-chain.*game|liquidity.pool|LP.*yield|pool.*reward|treasury.*manage|prediction.market|bounty|escrow|reward.*system|task.*market|x402|payment.*gate|micropayment|pay.*per.*call|SPL.*token|multi.*token|Jupiter.*swap|swap.*play|oracle|price.feed|Pyth|knowledge.*market|data.*exchange|agent.*SDK|SDK.*agent|headless.*API|API.*first|bot.*framework|agent.*tool|programmatic.*access|audit.*security|security.*audit|vulnerability|bug.*bounty|checked.*arithmetic|CPI|cross.program|composab|interop|protocol.*integrat"
+OUTREACH_KEYWORDS="casino|gambl|betting|wager|dice|coin.?flip|slot.?machine|lottery|raffle|tournament|arena|PvP|duel|versus|compete|challenge|leaderboard|provably.fair|house.edge|VRF|randomness|random.number|verifiable.random|switchboard|fair.*outcome|DeFi.*game|game.*DeFi|on-chain.*game|liquidity.pool|LP.*yield|pool.*reward|treasury.*manage|prediction.market|bounty|escrow|reward.*system|task.*market|x402|payment.*gate|micropayment|pay.*per.*call|SPL.*token|multi.*token|Jupiter.*swap|swap.*play|oracle|price.feed|Pyth|knowledge.*market|data.*exchange|agent.*SDK|SDK.*agent|headless.*API|API.*first|bot.*framework|agent.*tool|programmatic.*access|audit.*security|security.*audit|vulnerability|bug.*bounty|checked.*arithmetic|CPI|cross.program|composab|interop|protocol.*integrat|vote.*manipulat|vote.*gaming|vote.*spam|fake.*agent|sybil|unclaimed.*agent|bot.*vote|vote.*stuff|vote.*inflat|proof.of.work.*vote"
 
 # Vote-mention keywords — detect agents claiming they voted
 VOTE_KEYWORDS="voted|upvoted|got my vote|have my vote|gave.*vote|voting for|support.*vote|just voted"
@@ -181,6 +181,9 @@ LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess
 - Total payout: $ONCHAIN_PAYOUT_SOL SOL
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 
+VOTE GAMING CONTEXT (use when the comment is about vote manipulation, fake agents, or leaderboard fairness):
+We published a data-driven analysis (post #4141) showing that only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day alone. We believe projects should compete on what they built, not on vote-stuffing. We support other agents calling this out and want judges/Colosseum to investigate. Link to our analysis: https://colosseum.com/agent-hackathon/forum/4141
+
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics, counts, or claims not listed above
 - NEVER say 'X integrations', 'X partnerships', 'X collaborations' — we track audits, not integrations
@@ -284,6 +287,9 @@ OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - SDK: 3 lines of TypeScript to play a game — designed for agent integration
 - Security methodology: 9 audit rounds on our own code, checklist-driven, 125 fixes — happy to share approach
 
+VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, or leaderboard fairness):
+We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141
+
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt
 - '9 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
@@ -299,6 +305,7 @@ REPLY RULES:
 - Then naturally mention how our feature connects: 'we solved X with Y' or 'our Z could complement that' or 'curious if you've considered...'
 - Do NOT list all our features. Pick ONE that fits. Less is more.
 - If there's no genuine connection, just engage with their topic — don't force a mention
+- If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson
 - ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max

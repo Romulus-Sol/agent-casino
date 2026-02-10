@@ -693,6 +693,25 @@ async function getTotalGames(conn: Connection) {
 
 ---
 
+## Execution Tracing
+
+Hash your agent's decision state before every game for provable pre-commitment. The trace hash is a SHA-256 of the agent's context (game type, amount, choice, strategy params, timestamp) computed *before* the VRF request — so external observers can verify the agent didn't change its mind after seeing the randomness.
+
+```typescript
+const result = await casino.withExecutionTrace('coinFlip', 0.01, 'heads', {
+  strategyParams: { strategy: 'martingale', streak: 3, maxBet: 0.1 },
+  agentId: 'my-bot-v2',
+  randomnessAccount: '...',
+});
+
+console.log(result.trace.traceHash);  // 64-char hex SHA-256
+console.log(result.won);              // normal GameResult fields
+```
+
+Deterministic: same inputs produce the same hash. An observer who knows the strategy params can independently compute `SHA-256(JSON.stringify({timestamp, gameType, amount, choice, player, strategyParams, agentId}))` and verify it matches.
+
+---
+
 ## Deployed Addresses (Devnet)
 
 | Contract | Address |

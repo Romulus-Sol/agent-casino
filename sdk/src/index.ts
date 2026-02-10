@@ -161,6 +161,23 @@ export interface SwapAndPlayResult extends GameResult {
   swap: JupiterSwapResult;
 }
 
+// Execution trace types — for anchoring agent decision state pre-game
+
+export interface ExecutionTrace {
+  traceHash: string;                       // SHA-256 of the trace payload
+  timestamp: number;                       // Decision timestamp (ms since epoch)
+  gameType: string;                        // CoinFlip, DiceRoll, Limbo, Crash
+  amount: number;                          // Bet amount in SOL
+  choice: number | string;                 // Player's choice
+  player: string;                          // Player public key
+  strategyParams?: Record<string, any>;    // Optional: agent strategy context
+  agentId?: string;                        // Optional: agent identifier
+}
+
+export interface TracedGameResult extends GameResult {
+  trace: ExecutionTrace;
+}
+
 // Memory Slots types
 
 export type MemoryCategory = 'Strategy' | 'Technical' | 'Alpha' | 'Random';
@@ -605,6 +622,86 @@ export class AgentCasino {
       result: 0,
       choice: Math.floor(cashoutMultiplier * 100),
     };
+  }
+
+  // === Execution Tracing ===
+
+  /**
+   * Play a game with execution tracing — hashes agent decision state before the
+   * game executes and returns the trace alongside the result. The trace hash is
+   * a SHA-256 of the pre-game context (game type, amount, choice, timestamp,
+   * optional strategy params) so external observers can verify the agent's
+   * pre-commitment independently.
+   *
+   * @param gameType Which game to play
+   * @param amount Bet in SOL
+   * @param choice Game-specific choice (CoinChoice, DiceTarget, or multiplier)
+   * @param options Optional strategy context and agent ID
+   * @returns GameResult with attached ExecutionTrace
+   *
+   * @example
+   * const result = await casino.withExecutionTrace('coinFlip', 0.01, 'heads', {
+   *   strategyParams: { strategy: 'martingale', streak: 3 },
+   *   agentId: 'my-bot-v2',
+   *   randomnessAccount: '...',
+   * });
+   * console.log(result.trace.traceHash); // SHA-256 of pre-game decision state
+   */
+  async withExecutionTrace(
+    gameType: 'coinFlip' | 'diceRoll' | 'limbo' | 'crash',
+    amount: number,
+    choice: CoinChoice | DiceTarget | number,
+    options?: {
+      strategyParams?: Record<string, any>;
+      agentId?: string;
+      randomnessAccount?: string;
+    }
+  ): Promise<TracedGameResult> {
+    const timestamp = Date.now();
+    const player = this.wallet.publicKey.toString();
+
+    // Build the trace payload — everything the agent "committed to" before the game
+    const tracePayload = JSON.stringify({
+      timestamp,
+      gameType,
+      amount,
+      choice,
+      player,
+      strategyParams: options?.strategyParams || {},
+      agentId: options?.agentId || player,
+    });
+
+    const traceHash = createHash('sha256').update(tracePayload).digest('hex');
+
+    // Execute the game
+    let gameResult: GameResult;
+    switch (gameType) {
+      case 'coinFlip':
+        gameResult = await this.coinFlip(amount, choice as CoinChoice, options?.randomnessAccount);
+        break;
+      case 'diceRoll':
+        gameResult = await this.diceRoll(amount, choice as DiceTarget, options?.randomnessAccount);
+        break;
+      case 'limbo':
+        gameResult = await this.limbo(amount, choice as number, options?.randomnessAccount);
+        break;
+      case 'crash':
+        gameResult = await this.crash(amount, choice as number, options?.randomnessAccount);
+        break;
+    }
+
+    const trace: ExecutionTrace = {
+      traceHash,
+      timestamp,
+      gameType,
+      amount,
+      choice,
+      player,
+      strategyParams: options?.strategyParams,
+      agentId: options?.agentId,
+    };
+
+    return { ...gameResult, trace };
   }
 
   // === Stats & Analytics ===

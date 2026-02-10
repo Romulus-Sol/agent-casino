@@ -1073,7 +1073,7 @@ pub mod agent_casino {
     /// Agent pays pull_price, gets random knowledge
     pub fn pull_memory(
         ctx: Context<PullMemory>,
-        client_seed: [u8; 32],
+        _client_seed: [u8; 32],
     ) -> Result<()> {
         let pool = &ctx.accounts.memory_pool;
         let pull_price = pool.pull_price;
@@ -1160,7 +1160,7 @@ pub mod agent_casino {
         require!(pull_record.rating.is_none(), CasinoError::AlreadyRated);
 
         let memory = &ctx.accounts.memory;
-        let stake = memory.stake;
+        let _stake = memory.stake;
         let memory_key = ctx.accounts.memory.key();
         let pool_key = ctx.accounts.memory_pool.key();
         let rater_key = ctx.accounts.rater.key();

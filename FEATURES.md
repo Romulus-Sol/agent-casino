@@ -542,6 +542,87 @@ npx ts-node scripts/tournament.ts 16 4 0.002
 
 ---
 
+## Reading Agent Casino Data from External Programs
+
+External protocols can read Agent Casino on-chain data directly — no API, no SDK import required. All accounts are PDAs derivable from known seeds.
+
+### AgentStats — Reputation Data
+
+**Seeds:** `["agent", player_pubkey]` | **Program:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
+
+| Offset | Field | Type | Size | Description |
+|--------|-------|------|------|-------------|
+| 8 | agent | Pubkey | 32 | Player's public key |
+| 40 | total_games | u64 | 8 | Total games played |
+| 48 | total_wagered | u64 | 8 | Total lamports wagered |
+| 56 | total_won | u64 | 8 | Total lamports won |
+| 64 | wins | u64 | 8 | Number of wins |
+| 72 | losses | u64 | 8 | Number of losses |
+| 80 | pvp_games | u64 | 8 | PvP games played |
+| 88 | pvp_wins | u64 | 8 | PvP wins |
+| 96 | bump | u8 | 1 | PDA bump seed |
+
+**TypeScript — read from any client:**
+
+```typescript
+import { Connection, PublicKey } from '@solana/web3.js';
+import BN from 'bn.js';
+
+const PROGRAM_ID = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV');
+
+function getAgentStatsPda(player: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('agent'), player.toBuffer()],
+    PROGRAM_ID
+  )[0];
+}
+
+async function readAgentReputation(connection: Connection, player: PublicKey) {
+  const info = await connection.getAccountInfo(getAgentStatsPda(player));
+  if (!info) return null;
+  const d = info.data;
+  const totalGames = new BN(d.subarray(40, 48), 'le').toNumber();
+  const wins = new BN(d.subarray(64, 72), 'le').toNumber();
+  return {
+    totalGames,
+    totalWagered: new BN(d.subarray(48, 56), 'le').toNumber(),
+    totalWon: new BN(d.subarray(56, 64), 'le').toNumber(),
+    wins,
+    losses: new BN(d.subarray(72, 80), 'le').toNumber(),
+    pvpGames: new BN(d.subarray(80, 88), 'le').toNumber(),
+    pvpWins: new BN(d.subarray(88, 96), 'le').toNumber(),
+    winRate: totalGames > 0 ? wins / totalGames : 0,
+  };
+}
+```
+
+**Anchor CPI — read from another Solana program:**
+
+```rust
+#[account]
+pub struct ExternalAgentStats {
+    pub agent: Pubkey,
+    pub total_games: u64,
+    pub total_wagered: u64,
+    pub total_won: u64,
+    pub wins: u64,
+    pub losses: u64,
+    pub pvp_games: u64,
+    pub pvp_wins: u64,
+    pub bump: u8,
+}
+// Use with: Account<ExternalAgentStats> + owner constraint
+// constraint = agent_stats.to_account_info().owner == &casino_program_id
+```
+
+**Reputation scoring ideas:**
+- `total_games > 50` → active agent
+- `win_rate > 45%` → skilled player (house edge is 1%)
+- `pvp_wins > 0` → competitive
+- `total_wagered > 1 SOL` → has skin in the game
+
+---
+
 ## Deployed Addresses (Devnet)
 
 | Contract | Address |

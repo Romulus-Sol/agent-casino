@@ -163,7 +163,16 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 4 provably fair games (VRF-only, no clock-based randomness), Switchboard VRF, PvP challenges, memory slots marketplace, hitman bounty market, Pyth price predictions, x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system. 9 self-audits, 125 vulnerabilities found and fixed, 0 remaining. 79 tests (68 SDK + 11 on-chain). 100% AI-built.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana.
+
+WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or rephrase into different stats):
+- 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
+- PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
+- x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system
+- 9 security audits (NOT '9 integrations' or '9 partnerships' — audits only), 125 vulnerabilities found and fixed, 0 remaining
+- 80 tests (69 SDK + 11 on-chain)
+- 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
+- 65 Anchor instructions deployed on devnet
 
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
 - Total games played: $ONCHAIN_TOTAL_GAMES
@@ -171,6 +180,13 @@ LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess
 - Total volume: $ONCHAIN_VOLUME_SOL SOL
 - Total payout: $ONCHAIN_PAYOUT_SOL SOL
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
+
+ANTI-HALLUCINATION RULES (CRITICAL):
+- NEVER invent statistics, counts, or claims not listed above
+- NEVER say 'X integrations', 'X partnerships', 'X collaborations' — we track audits, not integrations
+- NEVER make up feature names or capabilities not listed above
+- If you're unsure about a number, omit it rather than guess
+- Do NOT reinterpret '9 audits' as '9' of anything else
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
@@ -194,7 +210,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 9 self-audits, 125 bugs found and fixed, 79 tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 9 security audits, 125 bugs found and fixed, 80 tests).
 
 THIS IS AN INTEGRATION REQUEST — someone wants to work with us. This is our HIGHEST PRIORITY. Be enthusiastic, welcoming, and give them everything they need to integrate.
 
@@ -209,7 +225,7 @@ LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess
 TECHNICAL DETAILS TO INCLUDE (pick what's relevant to their request):
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 - SDK: npm install @agent-casino/sdk
-- Repo: github.com/Romulus-Sol/agent-casino (open source, PRs welcome)
+- Repo: github.com/Romulus-Sol/agent-casino (open source, PRs welcome — 1 merged PR so far from MoltLaunch)
 - Key PDAs: House [\"house\"], AgentStats [\"agent\", player_pubkey], GameRecord [\"game\", house, game_index], HitPool [\"hit_pool\"], TokenVault [\"token_vault\", house, mint]
 - SDK methods: coinFlip(), diceRoll(), limbo(), crash(), addLiquidity(), getPlayerStats(), getGameHistory(), getHouseStats()
 - Hitman Market: createHit(), claimHit(), submitProof(), verifyHit() — on-chain bounty escrow
@@ -218,6 +234,11 @@ TECHNICAL DETAILS TO INCLUDE (pick what's relevant to their request):
 - x402 HTTP server: Express on port 3402, USDC payment gating (server/ directory)
 - Memory Slots: depositMemory(), pullMemory() — knowledge marketplace
 - LP system: addLiquidity() — earn proportional house edge from every game
+
+ANTI-HALLUCINATION RULES (CRITICAL):
+- NEVER invent statistics not listed in this prompt (no fake integration counts, partnership numbers, user counts, etc.)
+- '9 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
+- If unsure about a number, omit it rather than guess
 
 REPLY RULES:
 - ALWAYS start with @AgentName
@@ -239,7 +260,7 @@ generate_outreach_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 9 self-audits, 125 bugs found and fixed. 100% AI-built.
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 9 security audits run on our own code, 125 bugs found and fixed. 100% AI-built.
 
 YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
 
@@ -261,7 +282,13 @@ OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - Jupiter auto-swap: swap any token to SOL and play in one call
 - SPL token vaults: play with any SPL token (USDC, BONK, etc.)
 - SDK: 3 lines of TypeScript to play a game — designed for agent integration
-- Security methodology: 9 audit rounds, checklist-driven, 125 fixes — happy to share approach
+- Security methodology: 9 audit rounds on our own code, checklist-driven, 125 fixes — happy to share approach
+
+ANTI-HALLUCINATION RULES (CRITICAL):
+- NEVER invent statistics not listed in this prompt
+- '9 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
+- Do NOT say 'X agent integrations' or 'X partnerships' — we don't track those numbers
+- If unsure about a number, omit it rather than guess
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else.
 
@@ -290,6 +317,8 @@ is_bad_reply() {
     echo "$reply" | grep -qiE "out of.*(usage|credit|quota)|resets [0-9]|rate.limit|too many request|usage.limit|Invalid API|API key|unauthorized|forbidden|exceeded|capacity|overloaded|try again later|503|429|error code" && return 0
     # Claude meta-output (not a reply)
     echo "$reply" | grep -qiE "^I (cannot|can't|am unable|don't have)" && return 0
+    # Hallucinated stats — catch "X integrations/partnerships/collaborations" (we don't track these)
+    echo "$reply" | grep -qiE "[0-9]+ (agent )?integration|[0-9]+ partnership|[0-9]+ collaboration" && return 0
     return 1
 }
 

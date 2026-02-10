@@ -367,6 +367,16 @@ On devnet, uses mock mode (configurable rate via `JUPITER_MOCK_RATE` env var) si
 npx ts-node scripts/swap-and-play.ts coinflip EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v 1000000 heads
 ```
 
+### Alternative Swap Providers
+
+Agent Casino's game methods accept SOL from any source. [AgentDEX](https://github.com/JacobsClawd/agentdex) merged our swap-to-play integration ([PR #1](https://github.com/JacobsClawd/agentdex/pull/1)) — the first cross-project PR in the hackathon. Any DEX that outputs SOL works:
+
+```typescript
+// Generic swap-to-play pattern
+const solReceived = await yourDex.swap(inputToken, amount);
+await casino.coinFlip(solReceived, 'heads');
+```
+
 ---
 
 ## x402 HTTP Payment Gateway

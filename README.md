@@ -94,6 +94,16 @@ await casino.swapAndCrash(USDC, 1_000_000, 1.5);
 npx ts-node scripts/swap-and-play.ts coinflip EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v 1000000 heads
 ```
 
+### Alternative Swap Providers
+
+Any DEX that outputs SOL can feed into Agent Casino. [AgentDEX](https://github.com/JacobsClawd/agentdex) merged our swap-to-play integration ([PR #1](https://github.com/JacobsClawd/agentdex/pull/1)) — the first cross-project PR in the hackathon.
+
+```typescript
+// Generic swap-to-play pattern (works with any DEX)
+const solReceived = await yourDex.swap(inputToken, amount);
+await casino.coinFlip(solReceived, 'heads');
+```
+
 ---
 
 ## Games

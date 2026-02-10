@@ -35,6 +35,10 @@ import { randomBytes, createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { jupiterSwapToSol, JupiterSwapResult } from './jupiter';
+import {
+  formatAttestation, verifyAttestationHash, parseVrfRequestRaw,
+  ExecutionAttestation, ParsedVrfRequest, ATTESTATION_VERSION, ATTESTATION_PROTOCOL,
+} from './attestation';
 import bs58 from 'bs58';
 
 // Program ID - update after deployment
@@ -702,6 +706,44 @@ export class AgentCasino {
     };
 
     return { ...gameResult, trace };
+  }
+
+  // === Attestations ===
+
+  /**
+   * Get a standardized attestation for a game by its index.
+   * Reads the VrfRequest PDA on-chain and formats it into an
+   * ExecutionAttestation with a verifiable SHA-256 hash.
+   *
+   * @param gameIndex The game index to attest
+   * @param player The player's public key (defaults to wallet owner)
+   * @returns ExecutionAttestation with attestation_hash
+   *
+   * @example
+   * const att = await casino.getAttestation(42);
+   * console.log(att.attestation_hash);  // SHA-256 hex
+   * console.log(att.won, att.payout_lamports);
+   *
+   * // Verify independently (no SDK needed):
+   * import { verifyAttestationHash } from '@agent-casino/sdk';
+   * verifyAttestationHash(att); // true
+   */
+  async getAttestation(gameIndex: number, player?: PublicKey): Promise<ExecutionAttestation> {
+    const playerKey = player || this.wallet.publicKey;
+    const [vrfPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('vrf_request'),
+        playerKey.toBuffer(),
+        new BN(gameIndex).toArrayLike(Buffer, 'le', 8),
+      ],
+      PROGRAM_ID
+    );
+
+    const info = await this.connection.getAccountInfo(vrfPda);
+    if (!info) throw new Error(`VrfRequest not found for game index ${gameIndex}`);
+
+    const vrfData = parseVrfRequestRaw(info.data);
+    return formatAttestation(vrfData, 'devnet', PROGRAM_ID.toString());
   }
 
   // === Stats & Analytics ===
@@ -2814,6 +2856,13 @@ export class AgentCasino {
 
 // === Hitman Market Re-export ===
 export { HitmanMarket, type Hit, type HitPoolStats } from './hitman';
+
+// === Attestation Re-exports ===
+export {
+  formatAttestation, verifyAttestationHash, parseVrfRequestRaw,
+  ATTESTATION_VERSION, ATTESTATION_PROTOCOL,
+  type ExecutionAttestation, type ParsedVrfRequest,
+} from './attestation';
 
 // === Helper Classes ===
 

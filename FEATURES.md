@@ -712,6 +712,30 @@ Deterministic: same inputs produce the same hash. An observer who knows the stra
 
 ---
 
+## Execution Attestations
+
+Standardized game attestations for cross-protocol verification. Reads a VrfRequest PDA on-chain and produces an `ExecutionAttestation` JSON with a `attestation_hash` (SHA-256 of canonical sorted-key JSON).
+
+```typescript
+// Get attestation for game #42
+const att = await casino.getAttestation(42);
+console.log(att.attestation_hash);  // 64-char hex SHA-256
+console.log(att.game_type, att.won, att.payout_lamports);
+
+// Verify independently — no SDK needed
+import { verifyAttestationHash } from '@agent-casino/sdk';
+const valid = verifyAttestationHash(att);  // true
+
+// Parse raw VrfRequest bytes yourself
+import { parseVrfRequestRaw, formatAttestation } from '@agent-casino/sdk';
+const vrfData = parseVrfRequestRaw(accountInfo.data);
+const att2 = formatAttestation(vrfData, 'devnet', programId);
+```
+
+Attestation fields: `version`, `protocol`, `network`, `program_id`, `game_index`, `game_type`, `player`, `house`, `bet_lamports`, `choice`, `target_multiplier` (limbo/crash), `result`, `payout_lamports`, `won`, `created_at`, `settled_at`, `request_slot`, `vrf_randomness_account`, `vrf_status`, `attestation_hash`. Schema is intentionally protocol-agnostic — any attestation consumer can verify the hash without importing the full SDK.
+
+---
+
 ## Deployed Addresses (Devnet)
 
 | Contract | Address |

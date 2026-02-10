@@ -318,6 +318,8 @@ Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC pe
 | TokenVault | `["token_vault", mint]` |
 | TokenGame | `["token_game", token_vault, game_index]` |
 
+> **Byte-level struct layouts** for AgentStats, VrfRequest, and House PDAs (with offsets for raw deserialization and market resolution) are in [FEATURES.md](./FEATURES.md#reading-agent-casino-data-from-external-programs).
+
 ## Integration Example
 
 Complete 20-line bot that plays 5 games and reports:

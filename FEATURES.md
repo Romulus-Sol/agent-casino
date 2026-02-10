@@ -621,6 +621,76 @@ pub struct ExternalAgentStats {
 - `pvp_wins > 0` → competitive
 - `total_wagered > 1 SOL` → has skin in the game
 
+### VrfRequest — Individual Game Data
+
+For prediction markets that resolve based on game outcomes (e.g. "did agent X win?").
+
+**Seeds:** `["vrf_request", player_pubkey, game_index_le_bytes]` | **Program:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
+
+| Offset | Field | Type | Size | Description |
+|--------|-------|------|------|-------------|
+| 8 | player | Pubkey | 32 | Player's public key |
+| 40 | house | Pubkey | 32 | House PDA |
+| 72 | randomness_account | Pubkey | 32 | Switchboard VRF account |
+| 104 | game_type | u8 (enum) | 1 | 0=CoinFlip, 1=DiceRoll, 2=Limbo, 3=PvPChallenge, 4=Crash |
+| 105 | amount | u64 | 8 | Bet in lamports |
+| 113 | choice | u8 | 1 | Player's choice |
+| 114 | target_multiplier | u16 | 2 | For limbo/crash (101-10000), 0 otherwise |
+| 116 | status | u8 (enum) | 1 | 0=Pending, 1=Settled, 2=Expired |
+| 117 | created_at | i64 | 8 | Unix timestamp |
+| 125 | settled_at | i64 | 8 | Settlement timestamp |
+| 133 | result | u8 | 1 | Game result |
+| 134 | payout | u64 | 8 | Payout in lamports |
+| 142 | game_index | u64 | 8 | Game index (used in PDA seeds) |
+| 150 | request_slot | u64 | 8 | Solana slot at request time |
+| 158 | bump | u8 | 1 | PDA bump seed |
+
+### House — Global Stats
+
+**Seeds:** `["house"]` | Byte offsets from MEMORY.md: authority(32)@8, pool(u64)@40, house_edge_bps(u16)@48, min_bet(u64)@50, max_bet_percent(u8)@58, total_games(u64)@59, total_volume(u64)@67, total_payout(u64)@75, bump(u8)@83.
+
+### Market Resolution Cookbook
+
+```typescript
+import { Connection, PublicKey } from '@solana/web3.js';
+import BN from 'bn.js';
+
+const PROGRAM = new PublicKey('5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV');
+
+// 1. Did agent X win game Y?
+async function didAgentWin(conn: Connection, player: PublicKey, gameIndex: number) {
+  const [vrfPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('vrf_request'), player.toBuffer(),
+     new BN(gameIndex).toArrayLike(Buffer, 'le', 8)],
+    PROGRAM
+  );
+  const info = await conn.getAccountInfo(vrfPda);
+  if (!info) return null;
+  const status = info.data[116]; // 1 = Settled
+  const payout = new BN(info.data.subarray(134, 142), 'le');
+  return { settled: status === 1, won: payout.toNumber() > 0, payout: payout.toNumber() };
+}
+
+// 2. What is the house profit?
+async function getHouseProfit(conn: Connection) {
+  const [housePda] = PublicKey.findProgramAddressSync([Buffer.from('house')], PROGRAM);
+  const info = await conn.getAccountInfo(housePda);
+  if (!info) return null;
+  const d = info.data;
+  const volume = new BN(d.subarray(67, 75), 'le').toNumber();
+  const payout = new BN(d.subarray(75, 83), 'le').toNumber();
+  return { totalVolume: volume, totalPayout: payout, profit: volume - payout };
+}
+
+// 3. Total games played (for volume-based markets)
+async function getTotalGames(conn: Connection) {
+  const [housePda] = PublicKey.findProgramAddressSync([Buffer.from('house')], PROGRAM);
+  const info = await conn.getAccountInfo(housePda);
+  if (!info) return 0;
+  return new BN(info.data.subarray(59, 67), 'le').toNumber();
+}
+```
+
 ---
 
 ## Deployed Addresses (Devnet)

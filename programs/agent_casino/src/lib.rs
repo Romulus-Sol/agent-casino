@@ -159,6 +159,11 @@ pub mod agent_casino {
         **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
         **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += refund_amount;
 
+        // Correct house stats — undo the volume/game count added at request time
+        let house = &mut ctx.accounts.house;
+        house.total_volume = house.total_volume.checked_sub(refund_amount).ok_or(CasinoError::MathOverflow)?;
+        house.total_games = house.total_games.checked_sub(1).ok_or(CasinoError::MathOverflow)?;
+
         // Mark as expired
         let vrf_request = &mut ctx.accounts.vrf_request;
         vrf_request.status = VrfStatus::Expired;

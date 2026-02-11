@@ -1,7 +1,7 @@
 {
   "name": "agent-casino",
   "version": "0.1.0",
-  "description": "A headless casino protocol for AI agents on Solana",
+  "description": "Trust-building primitive for AI agents on Solana — provably fair games with VRF verification",
   "private": true,
   "workspaces": [
     "sdk",

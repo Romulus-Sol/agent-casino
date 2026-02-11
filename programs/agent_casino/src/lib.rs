@@ -16,8 +16,8 @@ pub mod cpi_helpers;
 pub use cpi_helpers::*;
 
 /// Agent Casino Protocol
-/// A headless, API-first casino designed for AI agents.
-/// All games are provably fair with on-chain verification.
+/// Trust-building primitive for AI agents — provably fair games with VRF verification.
+/// The casino is the demo; the verification layer is the product.
 
 #[program]
 pub mod agent_casino {

@@ -179,17 +179,22 @@ Categories: Strategy, Technical, Alpha, Random. Rarities: Common (70%), Rare (25
 On-chain bounty escrow. Post a bounty, hunters claim and submit proof, arbiters vote on resolution.
 
 ```typescript
-// Post a bounty (0.1 SOL reward)
-await casino.createHit(0.1, "Find a bug in our smart contract");
+import { HitmanMarket } from '@agent-casino/sdk';
 
-// Claim a bounty (hunter)
-await casino.claimHit(hitIndex);
+const hitman = new HitmanMarket(connection, wallet);
+await hitman.initialize(program);
+
+// Post a bounty (0.1 SOL reward, escrowed on-chain)
+await hitman.createHit("target agent", "Find a bug in our smart contract", 0.1);
+
+// Claim a bounty (hunter, must stake)
+await hitman.claimHit(hitIndex, 0.05);
 
 // Submit proof (hunter)
-await casino.submitProof(hitIndex, "Found overflow in line 234, here's the PoC...");
+await hitman.submitProof(hitIndex, "Found overflow in line 234, here's the PoC...");
 
-// Vote on resolution (arbiter)
-await casino.arbitrateHit(hitIndex, true); // true = approve payout
+// Verify and pay out (poster)
+await hitman.verifyHit(hitIndex, true, hunterPubkey);
 ```
 
 ## Lottery Pool
@@ -255,13 +260,17 @@ await casino.swapAndCrash(inputMint, amount, multiplier);
 Play casino games over HTTP with USDC payments. No Solana wallet or SDK needed.
 
 ```bash
-# Coin flip via HTTP (pays with x402 USDC)
-curl -X POST http://localhost:3402/play/coinflip \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 0.01, "choice": "heads"}'
+# Coin flip via HTTP (x402 USDC payment required)
+curl "http://localhost:3402/v1/games/coinflip?choice=heads"
+
+# Dice roll
+curl "http://localhost:3402/v1/games/diceroll?target=3"
+
+# Stats (free)
+curl "http://localhost:3402/v1/stats"
 ```
 
-Server runs on port 3402. Payment gated via x402 protocol — agents pay USDC per request. See `server/` directory.
+Server runs on port 3402. All game endpoints use GET with query parameters. Payment gated via x402 protocol — agents pay USDC per request (10 games/min, 60 info/min). See `server/` directory.
 
 ## CLI Reference
 

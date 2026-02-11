@@ -791,26 +791,19 @@ Works in Docker, serverless functions, CLI tools, agent orchestrators — anywhe
 Play games over HTTP with USDC payments. No Solana wallet or TypeScript SDK needed.
 
 ```bash
-# Coin flip via HTTP
-curl -X POST http://localhost:3402/play/coinflip \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 0.01, "choice": "heads"}'
+# Coin flip via HTTP (x402 USDC payment required)
+curl "http://localhost:3402/v1/games/coinflip?choice=heads"
 
 # Dice roll
-curl -X POST http://localhost:3402/play/diceroll \
-  -d '{"amount": 0.01, "target": 3}'
+curl "http://localhost:3402/v1/games/diceroll?target=3"
 
-# Check house stats
-curl http://localhost:3402/stats
+# Check house stats (free)
+curl "http://localhost:3402/v1/stats"
 ```
 
 ```typescript
 // From any HTTP client (Python, Go, Rust, etc.)
-const res = await fetch('http://localhost:3402/play/coinflip', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ amount: 0.01, choice: 'heads' }),
-});
+const res = await fetch('http://localhost:3402/v1/games/coinflip?choice=heads');
 const result = await res.json();
 console.log(result.won, result.payout);
 ```
@@ -820,19 +813,22 @@ console.log(result.won, result.payout);
 Use the on-chain bounty escrow for any agent task — not just casino-related bounties.
 
 ```typescript
-const casino = new AgentCasino(connection, wallet);
+import { HitmanMarket } from '@agent-casino/sdk';
+
+const hitman = new HitmanMarket(connection, wallet);
+await hitman.initialize(program);
 
 // Post a bounty (0.1 SOL reward, escrowed on-chain)
-await casino.createHit(0.1, "Find a bug in contract XYZ");
+await hitman.createHit("target agent", "Find a bug in contract XYZ", 0.1);
 
-// Hunter claims the bounty
-await casino.claimHit(hitIndex);
+// Hunter claims the bounty (must stake)
+await hitman.claimHit(hitIndex, 0.05);
 
 // Hunter submits proof
-await casino.submitProof(hitIndex, "Found overflow in line 234, PoC: ...");
+await hitman.submitProof(hitIndex, "Found overflow in line 234, PoC: ...");
 
 // Poster verifies and pays out
-await casino.verifyHit(hitIndex, true, hunterPubkey);
+await hitman.verifyHit(hitIndex, true, hunterPubkey);
 ```
 
 Bounties are escrowed in the program's vault PDA — funds only release on verification. Anti-griefing: hunters must stake, and arbiters can resolve disputes.
@@ -983,18 +979,20 @@ Applied to every instruction across 9 audits:
 
 ### Pyth Oracle Validation
 
-Price prediction games validate Pyth feeds with:
+Price prediction settlement parses raw Pyth price account data and validates staleness:
 
 ```rust
-// Staleness check — reject feeds older than 60 seconds
-require!(price_update.publish_time > clock.unix_timestamp - 60, StalePrice);
+// Parse price from Pyth account at byte offset 208 (i64 LE)
+let price = i64::from_le_bytes(price_data[208..216].try_into().unwrap());
 
-// Confidence interval — reject if confidence > 2% of price
-let conf_pct = (price_update.conf as u64) * 10000 / (price_update.price as u64);
-require!(conf_pct < 200, LowConfidence);
+// Parse publish_time from offset 232 (i64 LE)
+let publish_time = i64::from_le_bytes(price_data[232..240].try_into().unwrap());
 
-// Positive price — reject negative or zero prices
-require!(price_update.price > 0, InvalidPrice);
+// Staleness check — reject feeds older than 60 seconds (checked arithmetic)
+let price_age = clock.unix_timestamp
+    .checked_sub(publish_time)
+    .ok_or(CasinoError::MathOverflow)?;
+require!(price_age < 60, CasinoError::PriceFeedStale);
 ```
 
 ### x402 Rate Limiting
@@ -1002,7 +1000,7 @@ require!(price_update.price > 0, InvalidPrice);
 The x402 HTTP server implements per-endpoint rate limiting:
 
 - USDC payment verification before processing any game request
-- Per-IP rate limiting (configurable, default 60 requests/hour)
+- Per-IP rate limiting (free endpoints: 60/min, game endpoints: 10/min)
 - Payment amount validation (minimum bet enforcement)
 - Response includes game result + transaction signature for on-chain verification
 

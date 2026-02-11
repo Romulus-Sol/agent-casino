@@ -3,6 +3,7 @@
  *
  * Showcases: house stats, VRF games, memory slots, hitman market, agent stats.
  * Each VRF game uses Switchboard VRF for provably fair randomness.
+ * Solana-themed terminal colors (green/purple/teal gradient).
  *
  * Usage: npx ts-node scripts/demo.ts
  */
@@ -17,24 +18,86 @@ import * as path from "path";
 
 const PROGRAM_ID = new PublicKey("5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
 
-// ── Helpers ──
+// ── Solana-Themed Terminal Colors (256-color) ──────────────────────
+const R      = "\x1b[0m";        // Reset
+const B      = "\x1b[1m";        // Bold
+const DIM    = "\x1b[2m";        // Dim
+const IT     = "\x1b[3m";        // Italic
 
-function banner(text: string) {
-  const line = "═".repeat(60);
-  console.log(`\n${line}`);
-  console.log(`  ${text}`);
-  console.log(`${line}\n`);
-}
+// Solana brand palette (256-color foreground)
+const SOL_GREEN  = "\x1b[38;5;49m";   // #14F195 — Solana mint green
+const SOL_PURPLE = "\x1b[38;5;135m";  // #9945FF — Solana purple
+const SOL_TEAL   = "\x1b[38;5;45m";   // #00D1FF — Solana blue
+const SOL_LIME   = "\x1b[38;5;118m";  // bright lime accent
+const WHT        = "\x1b[38;5;255m";  // white
+const RED        = "\x1b[38;5;196m";  // red for errors/losses
+const GRN        = "\x1b[38;5;46m";   // bright green for wins
+const GOLD       = "\x1b[38;5;220m";  // gold for values
+const ORANGE     = "\x1b[38;5;208m";  // orange
+const CYN        = "\x1b[38;5;51m";   // cyan
+const PINK       = "\x1b[38;5;213m";  // pink
 
-function section(text: string) {
-  console.log(`\n--- ${text} ---\n`);
-}
+// Backgrounds
+const BGGRN      = "\x1b[48;5;22m";   // dark green bg
+const BGRED      = "\x1b[48;5;52m";   // dark red bg
+const BGPURP     = "\x1b[48;5;54m";   // dark purple bg
+const BGTEAL     = "\x1b[48;5;24m";   // dark teal bg
+
+// Solana gradient: green -> teal -> purple
+const GRAD = [
+  "\x1b[38;5;49m",  "\x1b[38;5;48m",  "\x1b[38;5;47m",
+  "\x1b[38;5;43m",  "\x1b[38;5;44m",  "\x1b[38;5;45m",
+  "\x1b[38;5;39m",  "\x1b[38;5;33m",  "\x1b[38;5;99m",
+  "\x1b[38;5;135m", "\x1b[38;5;134m", "\x1b[38;5;133m",
+];
+
+// Section colors
+const SECTIONS = [
+  { bg: BGTEAL,  fg: SOL_TEAL,   emoji: "\u{1f3e0}" }, // House Stats
+  { bg: BGPURP,  fg: SOL_PURPLE, emoji: "\u{1f3b2}" }, // VRF Games
+  { bg: BGTEAL,  fg: SOL_GREEN,  emoji: "\u{1f9e0}" }, // Memory Slots
+  { bg: BGRED,   fg: ORANGE,     emoji: "\u{1f3af}" }, // Hitman Market
+  { bg: BGGRN,   fg: SOL_LIME,   emoji: "\u{1f4ca}" }, // Agent Stats
+];
+
+// ── Helpers ─────────────────────────────────────────────────────────
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ── VRF Game Player ──
+function gradientText(text: string): string {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const ci = Math.floor((i / text.length) * GRAD.length);
+    out += GRAD[Math.min(ci, GRAD.length - 1)] + B + text[i];
+  }
+  return out + R;
+}
+
+function banner(sectionIndex: number, title: string) {
+  const s = SECTIONS[sectionIndex];
+  const bar = `${s.fg}${"━".repeat(60)}${R}`;
+  console.log("");
+  console.log(bar);
+  console.log(`  ${s.bg}${B}${WHT}  ${s.emoji}  ${R} ${s.fg}${B}${title}${R}`);
+  console.log(bar);
+  console.log("");
+}
+
+function statLine(label: string, value: string, color = GOLD) {
+  const padLabel = label.padEnd(14);
+  console.log(`  ${DIM}${padLabel}${R} ${color}${B}${value}${R}`);
+}
+
+function resultLine(won: boolean, game: string, detail: string) {
+  const bg = won ? BGGRN : BGRED;
+  const fg = won ? GRN : RED;
+  const tag = won ? " WIN " : " LOSS";
+  console.log(`  ${bg}${B}${WHT} ${tag} ${R} ${fg}${B}${game}${R}  ${DIM}${detail}${R}`);
+}
+
+// ── VRF Game Player ─────────────────────────────────────────────────
 
 async function vrfPlayGame(
   sbProgram: anchor.Program,
@@ -132,7 +195,6 @@ async function vrfPlayGame(
     await sleep(3000);
     try {
       const revealPromise = rngAccount.revealIx(keypair.publicKey);
-      // Swallow rejections from the dangling promise if we time out
       revealPromise.catch(() => {});
       const revealIx = await Promise.race([
         revealPromise,
@@ -147,7 +209,6 @@ async function vrfPlayGame(
       break;
     } catch (e: any) {
       if (i === 19) {
-        // Restore output before throwing
         console.log = origLog; console.error = origErr; console.warn = origWarn;
         process.stdout.write = origStdoutWrite; process.stderr.write = origStderrWrite;
         throw new Error(`VRF oracle unavailable after 20 retries`);
@@ -155,9 +216,8 @@ async function vrfPlayGame(
     }
   }
 
-  // Wait for any dangling Switchboard SDK error logs to fire while muted
+  // Wait for dangling Switchboard SDK error logs to fire while muted
   await sleep(2000);
-  // Restore output
   console.log = origLog; console.error = origErr; console.warn = origWarn;
   process.stdout.write = origStdoutWrite; process.stderr.write = origStderrWrite;
 
@@ -166,16 +226,23 @@ async function vrfPlayGame(
   return { won: payout > 0, payout, result: (settled as any).result, tx };
 }
 
+// ── Main ────────────────────────────────────────────────────────────
+
 async function main() {
-  banner("AGENT CASINO — Full Feature Demo");
-  console.log("Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
-  console.log("Network:    Solana Devnet");
-  console.log("VRF:        Switchboard On-Demand");
-  console.log("Source:     github.com/Romulus-Sol/agent-casino");
+  // ── Intro Header ──
+  console.log("");
+  console.log(gradientText("  ╔══════════════════════════════════════════════════╗"));
+  console.log(gradientText("  ║     A G E N T   C A S I N O   P R O T O C O L   ║"));
+  console.log(gradientText("  ║         Full Feature Demo — Solana Devnet        ║"));
+  console.log(gradientText("  ╚══════════════════════════════════════════════════╝"));
+  console.log("");
+  statLine("Program ID:", "5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV", SOL_GREEN);
+  statLine("Network:", "Solana Devnet", SOL_TEAL);
+  statLine("VRF:", "Switchboard On-Demand", SOL_PURPLE);
+  statLine("Source:", "github.com/Romulus-Sol/agent-casino", WHT);
 
   // ── Setup ──
   const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-  // Suppress wallet info for clean demo output
   const origConsoleLog = console.log;
   console.log = () => {};
   const { keypair, address } = loadWallet();
@@ -195,31 +262,31 @@ async function main() {
 
   const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house")], PROGRAM_ID);
 
-  // ═══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════
   // ACT 1: HOUSE STATS
-  // ═══════════════════════════════════════════════════════════
-  banner("ACT 1: House Stats");
+  // ═══════════════════════════════════════════════════════════════════
+  banner(0, "ACT 1: House Stats");
 
   const balance = await connection.getBalance(keypair.publicKey);
   const house = await casino.getHouseStats();
 
-  console.log(`Wallet:      ${address}`);
-  console.log(`Balance:     ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+  statLine("Wallet:", address, SOL_GREEN);
+  statLine("Balance:", `${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`, GOLD);
   console.log("");
-  console.log(`Pool:        ${house.pool.toFixed(4)} SOL`);
-  console.log(`House Edge:  ${house.houseEdgeBps / 100}%`);
-  console.log(`Min Bet:     ${house.minBet} SOL`);
-  console.log(`Total Games: ${house.totalGames}`);
-  console.log(`Volume:      ${house.totalVolume.toFixed(4)} SOL`);
-  console.log(`Payout:      ${house.totalPayout.toFixed(4)} SOL`);
-  console.log(`Profit:      ${house.houseProfit.toFixed(4)} SOL`);
+  statLine("Pool:", `${house.pool.toFixed(4)} SOL`, SOL_TEAL);
+  statLine("House Edge:", `${house.houseEdgeBps / 100}%`, WHT);
+  statLine("Min Bet:", `${house.minBet} SOL`, WHT);
+  statLine("Total Games:", `${house.totalGames}`, GOLD);
+  statLine("Volume:", `${house.totalVolume.toFixed(4)} SOL`, GOLD);
+  statLine("Payout:", `${house.totalPayout.toFixed(4)} SOL`, GOLD);
+  statLine("Profit:", `${house.houseProfit.toFixed(4)} SOL`, SOL_GREEN);
 
-  // ═══════════════════════════════════════════════════════════
-  // ACT 2: VRF GAMES — Switchboard Randomness
-  // ═══════════════════════════════════════════════════════════
-  banner("ACT 2: VRF Games (Switchboard Randomness)");
-  console.log("Each game: create VRF account -> request -> oracle commit -> reveal+settle");
-  console.log("All randomness is on-chain and verifiable.\n");
+  // ═══════════════════════════════════════════════════════════════════
+  // ACT 2: VRF GAMES
+  // ═══════════════════════════════════════════════════════════════════
+  banner(1, "ACT 2: VRF Games (Switchboard Randomness)");
+  console.log(`  ${DIM}Each game: create VRF account -> request -> oracle commit -> reveal+settle${R}`);
+  console.log(`  ${DIM}All randomness is on-chain and verifiable.${R}\n`);
 
   const betSize = 0.001;
   let totalWon = 0;
@@ -227,97 +294,97 @@ async function main() {
 
   // Game 1: Coin Flip
   const coinChoice = Math.random() < 0.5 ? "heads" : "tails";
-  process.stdout.write(`[1/4] Coin Flip — ${coinChoice} @ ${betSize} SOL ... `);
+  process.stdout.write(`  ${SOL_GREEN}${B}[1/4]${R} ${WHT}Coin Flip${R} ${DIM}— ${coinChoice} @ ${betSize} SOL ...${R} `);
   try {
     const r = await vrfPlayGame(sbProgram, program, provider, housePda, keypair, "coinflip", betSize, coinChoice);
     if (r.won) {
       totalWon++;
-      console.log(`WIN +${r.payout.toFixed(4)} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${GRN}${B}WIN${R} ${GRN}+${r.payout.toFixed(4)} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     } else {
       totalLost++;
-      console.log(`LOSS -${betSize} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${RED}${B}LOSS${R} ${RED}-${betSize} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     }
   } catch (e: any) {
-    console.log(`ERROR: ${e.message.slice(0, 60)}`);
+    console.log(`${ORANGE}${B}ERROR:${R} ${DIM}${e.message.slice(0, 55)}${R}`);
   }
 
   await sleep(3000);
 
   // Game 2: Dice Roll
   const diceTarget = Math.floor(Math.random() * 3) + 1;
-  process.stdout.write(`[2/4] Dice Roll — target <=${diceTarget} @ ${betSize} SOL ... `);
+  process.stdout.write(`  ${SOL_TEAL}${B}[2/4]${R} ${WHT}Dice Roll${R} ${DIM}— target <=${diceTarget} @ ${betSize} SOL ...${R} `);
   try {
     const r = await vrfPlayGame(sbProgram, program, provider, housePda, keypair, "dice", betSize, diceTarget);
     if (r.won) {
       totalWon++;
-      console.log(`WIN +${r.payout.toFixed(4)} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${GRN}${B}WIN${R} ${GRN}+${r.payout.toFixed(4)} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     } else {
       totalLost++;
-      console.log(`LOSS -${betSize} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${RED}${B}LOSS${R} ${RED}-${betSize} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     }
   } catch (e: any) {
-    console.log(`ERROR: ${e.message.slice(0, 60)}`);
+    console.log(`${ORANGE}${B}ERROR:${R} ${DIM}${e.message.slice(0, 55)}${R}`);
   }
 
   await sleep(3000);
 
   // Game 3: Limbo
   const limboMult = +(1.5 + Math.random() * 1.5).toFixed(2);
-  process.stdout.write(`[3/4] Limbo — target ${limboMult}x @ ${betSize} SOL ... `);
+  process.stdout.write(`  ${SOL_PURPLE}${B}[3/4]${R} ${WHT}Limbo${R} ${DIM}— target ${limboMult}x @ ${betSize} SOL ...${R} `);
   try {
     const r = await vrfPlayGame(sbProgram, program, provider, housePda, keypair, "limbo", betSize, limboMult);
     if (r.won) {
       totalWon++;
-      console.log(`WIN +${r.payout.toFixed(4)} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${GRN}${B}WIN${R} ${GRN}+${r.payout.toFixed(4)} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     } else {
       totalLost++;
-      console.log(`LOSS -${betSize} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${RED}${B}LOSS${R} ${RED}-${betSize} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     }
   } catch (e: any) {
-    console.log(`ERROR: ${e.message.slice(0, 60)}`);
+    console.log(`${ORANGE}${B}ERROR:${R} ${DIM}${e.message.slice(0, 55)}${R}`);
   }
 
   await sleep(3000);
 
   // Game 4: Crash
   const crashMult = +(1.2 + Math.random() * 0.8).toFixed(2);
-  process.stdout.write(`[4/4] Crash — cashout ${crashMult}x @ ${betSize} SOL ... `);
+  process.stdout.write(`  ${PINK}${B}[4/4]${R} ${WHT}Crash${R} ${DIM}— cashout ${crashMult}x @ ${betSize} SOL ...${R} `);
   try {
     const r = await vrfPlayGame(sbProgram, program, provider, housePda, keypair, "crash", betSize, crashMult);
     if (r.won) {
       totalWon++;
-      console.log(`WIN +${r.payout.toFixed(4)} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${GRN}${B}WIN${R} ${GRN}+${r.payout.toFixed(4)} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     } else {
       totalLost++;
-      console.log(`LOSS -${betSize} SOL  (tx: ${r.tx.slice(0, 16)}...)`);
+      console.log(`${RED}${B}LOSS${R} ${RED}-${betSize} SOL${R}  ${DIM}tx: ${r.tx}${R}`);
     }
   } catch (e: any) {
-    console.log(`ERROR: ${e.message.slice(0, 60)}`);
+    console.log(`${ORANGE}${B}ERROR:${R} ${DIM}${e.message.slice(0, 55)}${R}`);
   }
 
-  console.log(`\nResult: ${totalWon}W / ${totalLost}L`);
+  console.log(`\n  ${DIM}Result:${R} ${GOLD}${B}${totalWon}W / ${totalLost}L${R}`);
 
-  // ═══════════════════════════════════════════════════════════
-  // ACT 3: MEMORY SLOTS — Knowledge Marketplace
-  // ═══════════════════════════════════════════════════════════
-  banner("ACT 3: Memory Slots (Knowledge Marketplace)");
+  // ═══════════════════════════════════════════════════════════════════
+  // ACT 3: MEMORY SLOTS
+  // ═══════════════════════════════════════════════════════════════════
+  banner(2, "ACT 3: Memory Slots (Knowledge Marketplace)");
 
   try {
     const [memoryPoolPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("memory_pool")], PROGRAM_ID);
     const pool = await program.account.memoryPool.fetch(memoryPoolPda);
 
-    console.log(`Pool:           ${memoryPoolPda.toString()}`);
-    console.log(`Pull Price:     ${pool.pullPrice.toNumber() / LAMPORTS_PER_SOL} SOL`);
-    console.log(`Stake Amount:   ${pool.stakeAmount.toNumber() / LAMPORTS_PER_SOL} SOL`);
-    console.log(`Total Memories: ${pool.totalMemories.toString()}`);
-    console.log(`Total Pulls:    ${pool.totalPulls.toString()}`);
-    console.log(`Pool Balance:   ${pool.poolBalance.toNumber() / LAMPORTS_PER_SOL} SOL`);
+    statLine("Pool:", memoryPoolPda.toString(), SOL_GREEN);
+    statLine("Pull Price:", `${pool.pullPrice.toNumber() / LAMPORTS_PER_SOL} SOL`, GOLD);
+    statLine("Stake Amount:", `${pool.stakeAmount.toNumber() / LAMPORTS_PER_SOL} SOL`, GOLD);
+    statLine("Memories:", pool.totalMemories.toString(), SOL_TEAL);
+    statLine("Total Pulls:", pool.totalPulls.toString(), SOL_TEAL);
+    statLine("Pool Balance:", `${pool.poolBalance.toNumber() / LAMPORTS_PER_SOL} SOL`, GOLD);
 
-    // Show last 3 memories
     const totalMem = pool.totalMemories.toNumber();
     if (totalMem > 0) {
-      section("Recent Memories");
+      console.log(`\n  ${SOL_GREEN}${B}Recent Memories${R}`);
+      console.log(`  ${DIM}${"─".repeat(56)}${R}`);
       const start = Math.max(0, totalMem - 3);
       for (let i = totalMem - 1; i >= start; i--) {
         try {
@@ -328,33 +395,34 @@ async function main() {
           const content = Buffer.from(mem.content.slice(0, mem.contentLength)).toString("utf8");
           const cat = Object.keys(mem.category)[0];
           const rar = Object.keys(mem.rarity)[0];
-          console.log(`  [${i}] ${cat}/${rar} — "${content.substring(0, 50)}${content.length > 50 ? "..." : ""}"`);
+          const rarColor = rar === "legendary" ? GOLD : rar === "rare" ? SOL_PURPLE : WHT;
+          console.log(`  ${DIM}[${i}]${R} ${rarColor}${B}${cat}/${rar}${R} ${DIM}— "${content.substring(0, 45)}${content.length > 45 ? "..." : ""}"${R}`);
         } catch { /* skip */ }
       }
     }
   } catch (e: any) {
-    console.log("Memory pool not found:", e.message.slice(0, 60));
+    console.log(`  ${DIM}Memory pool not found: ${e.message.slice(0, 60)}${R}`);
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // ACT 4: HITMAN MARKET — On-Chain Bounties
-  // ═══════════════════════════════════════════════════════════
-  banner("ACT 4: Hitman Market (On-Chain Bounties)");
+  // ═══════════════════════════════════════════════════════════════════
+  // ACT 4: HITMAN MARKET
+  // ═══════════════════════════════════════════════════════════════════
+  banner(3, "ACT 4: Hitman Market (On-Chain Bounties)");
 
   try {
     const [hitPoolPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("hit_pool")], PROGRAM_ID);
     const hitPool = await program.account.hitPool.fetch(hitPoolPda);
 
-    console.log(`Total Hits:      ${hitPool.totalHits.toString()}`);
-    console.log(`Completed:       ${hitPool.totalCompleted.toString()}`);
-    console.log(`Bounties Paid:   ${hitPool.totalBountiesPaid.toNumber() / LAMPORTS_PER_SOL} SOL`);
-    console.log(`House Edge:      ${hitPool.houseEdgeBps / 100}%`);
+    statLine("Total Hits:", hitPool.totalHits.toString(), ORANGE);
+    statLine("Completed:", hitPool.totalCompleted.toString(), SOL_GREEN);
+    statLine("Bounties Paid:", `${hitPool.totalBountiesPaid.toNumber() / LAMPORTS_PER_SOL} SOL`, GOLD);
+    statLine("House Edge:", `${hitPool.houseEdgeBps / 100}%`, WHT);
 
-    // Show last 3 hits
     const totalHits = hitPool.totalHits.toNumber();
     if (totalHits > 0) {
-      section("Recent Bounties");
+      console.log(`\n  ${ORANGE}${B}Recent Bounties${R}`);
+      console.log(`  ${DIM}${"─".repeat(56)}${R}`);
       const start = Math.max(0, totalHits - 3);
       for (let i = totalHits - 1; i >= start; i--) {
         try {
@@ -364,48 +432,58 @@ async function main() {
             [Buffer.from("hit"), hitPoolPda.toBuffer(), buf], PROGRAM_ID);
           const hit = await program.account.hit.fetch(hitPda);
           const status = Object.keys(hit.status)[0].toUpperCase();
-          console.log(`  [${i}] ${status} — "${hit.condition.substring(0, 45)}${hit.condition.length > 45 ? "..." : ""}" — ${hit.bounty.toNumber() / LAMPORTS_PER_SOL} SOL`);
+          const statusColor = status === "OPEN" ? SOL_GREEN : status === "COMPLETED" ? GOLD : DIM;
+          console.log(`  ${DIM}[${i}]${R} ${statusColor}${B}${status}${R} ${DIM}— "${hit.condition.substring(0, 40)}${hit.condition.length > 40 ? "..." : ""}"${R} ${GOLD}${B}${hit.bounty.toNumber() / LAMPORTS_PER_SOL} SOL${R}`);
         } catch { /* skip */ }
       }
     }
   } catch (e: any) {
-    console.log("Hit pool not found:", e.message.slice(0, 60));
+    console.log(`  ${DIM}Hit pool not found: ${e.message.slice(0, 60)}${R}`);
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // ACT 5: AGENT STATS — On-Chain Leaderboard
-  // ═══════════════════════════════════════════════════════════
-  banner("ACT 5: Agent Stats (On-Chain Leaderboard)");
+  // ═══════════════════════════════════════════════════════════════════
+  // ACT 5: AGENT STATS
+  // ═══════════════════════════════════════════════════════════════════
+  banner(4, "ACT 5: Agent Stats (On-Chain Leaderboard)");
 
   try {
     const stats = await casino.getMyStats();
-    console.log(`Total Games:  ${stats.totalGames}`);
-    console.log(`Total Wagered: ${stats.totalWagered.toFixed(4)} SOL`);
-    console.log(`Total Won:    ${stats.totalWon.toFixed(4)} SOL`);
-    console.log(`Win Rate:     ${stats.winRate.toFixed(1)}%`);
-    console.log(`PvP Games:    ${stats.pvpGames || 0}`);
-    console.log(`PvP Wins:     ${stats.pvpWins || 0}`);
+    statLine("Total Games:", `${stats.totalGames}`, GOLD);
+    statLine("Wagered:", `${stats.totalWagered.toFixed(4)} SOL`, GOLD);
+    statLine("Won:", `${stats.totalWon.toFixed(4)} SOL`, SOL_GREEN);
+    statLine("Win Rate:", `${stats.winRate.toFixed(1)}%`, stats.winRate >= 50 ? SOL_GREEN : RED);
+    statLine("PvP Games:", `${stats.pvpGames || 0}`, SOL_TEAL);
+    statLine("PvP Wins:", `${stats.pvpWins || 0}`, SOL_TEAL);
   } catch {
-    console.log("No agent stats found for this wallet.");
+    console.log(`  ${DIM}No agent stats found for this wallet.${R}`);
   }
 
-  // ── Updated house stats ──
+  // Updated house stats
   const updatedHouse = await casino.getHouseStats();
-  section("Updated House Stats");
-  console.log(`Games: ${house.totalGames} -> ${updatedHouse.totalGames} (+${updatedHouse.totalGames - house.totalGames})`);
-  console.log(`Pool:  ${house.pool.toFixed(4)} -> ${updatedHouse.pool.toFixed(4)} SOL`);
+  console.log(`\n  ${SOL_TEAL}${B}Updated House Stats${R}`);
+  console.log(`  ${DIM}${"─".repeat(56)}${R}`);
+  const gamesDelta = updatedHouse.totalGames - house.totalGames;
+  console.log(`  ${DIM}Games:${R} ${GOLD}${B}${house.totalGames}${R} ${DIM}->${R} ${SOL_GREEN}${B}${updatedHouse.totalGames}${R} ${DIM}(+${gamesDelta})${R}`);
+  console.log(`  ${DIM}Pool:${R}  ${GOLD}${B}${house.pool.toFixed(4)}${R} ${DIM}->${R} ${SOL_GREEN}${B}${updatedHouse.pool.toFixed(4)} SOL${R}`);
 
-  // ═══════════════════════════════════════════════════════════
-  banner("Demo Complete");
-  console.log("Program:  5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV");
-  console.log("Source:   github.com/Romulus-Sol/agent-casino");
-  console.log("SDK:      npm install @agent-casino/sdk");
-  console.log("Docs:     skill.md / FEATURES.md");
-  console.log("\n11 security audits | 166 found | 144 fixed | VRF-only randomness");
-  console.log("Built by Claude for the Colosseum Agent Hackathon 2026\n");
+  // ═══════════════════════════════════════════════════════════════════
+  // OUTRO
+  // ═══════════════════════════════════════════════════════════════════
+  console.log("");
+  console.log(gradientText("  ══════════════════════════════════════════════════"));
+  console.log(gradientText("                   Demo Complete                    "));
+  console.log(gradientText("  ══════════════════════════════════════════════════"));
+  console.log("");
+  statLine("Program:", "5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV", SOL_GREEN);
+  statLine("Source:", "github.com/Romulus-Sol/agent-casino", WHT);
+  statLine("SDK:", "npm install @agent-casino/sdk", SOL_TEAL);
+  statLine("Docs:", "skill.md / FEATURES.md", SOL_PURPLE);
+  console.log("");
+  console.log(`  ${SOL_GREEN}${B}11 security audits${R} ${DIM}|${R} ${GOLD}${B}166 found${R} ${DIM}|${R} ${SOL_GREEN}${B}144 fixed${R} ${DIM}|${R} ${SOL_PURPLE}${B}VRF-only randomness${R}`);
+  console.log(`  ${DIM}${IT}Built by Claude for the Colosseum Agent Hackathon 2026${R}\n`);
 }
 
 main().catch((err) => {
-  console.error(`Fatal: ${err.message}`);
+  console.error(`${RED}${B}Fatal:${R} ${err.message}`);
   process.exit(1);
 });

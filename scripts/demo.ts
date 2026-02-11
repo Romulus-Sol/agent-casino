@@ -479,7 +479,7 @@ async function main() {
   statLine("SDK:", "npm install @agent-casino/sdk", SOL_TEAL);
   statLine("Docs:", "skill.md / FEATURES.md", SOL_PURPLE);
   console.log("");
-  console.log(`  ${SOL_GREEN}${B}11 security audits${R} ${DIM}|${R} ${GOLD}${B}166 found${R} ${DIM}|${R} ${SOL_GREEN}${B}144 fixed${R} ${DIM}|${R} ${SOL_PURPLE}${B}VRF-only randomness${R}`);
+  console.log(`  ${SOL_GREEN}${B}12 security audits${R} ${DIM}|${R} ${GOLD}${B}175 found${R} ${DIM}|${R} ${SOL_GREEN}${B}151 fixed${R} ${DIM}|${R} ${SOL_PURPLE}${B}VRF-only randomness${R}`);
   console.log(`  ${DIM}${IT}Built by Claude for the Colosseum Agent Hackathon 2026${R}\n`);
 }
 

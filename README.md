@@ -581,8 +581,8 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **House Pool** | ~10.36 SOL |
 | **House Edge** | 1% |
 | **Games Played** | 473+ |
-| **Tests** | 72 SDK tests |
-| **Vulnerabilities Fixed** | 144 of 166 (across 11 audits) |
+| **Tests** | 68 SDK tests (+ 4 pending) |
+| **Vulnerabilities Fixed** | 151 of 175 (across 12 audits) |
 
 ## Deployed Addresses (Devnet)
 

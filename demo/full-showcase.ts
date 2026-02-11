@@ -887,8 +887,8 @@ async function main() {
   console.log(`    ${GRN}${B}══════ Security ══════${R}`);
   blank();
   const secItems: [string, string, string][] = [
-    ["Audits       ", "11 rounds",                                   GRN],
-    ["Bugs Fixed   ", "166 found, 144 fixed, 9 won't fix, 13 by design", GRN],
+    ["Audits       ", "12 rounds",                                   GRN],
+    ["Bugs Fixed   ", "175 found, 151 fixed, 11 won't fix, 13 by design", GRN],
     ["Hashing      ", "SHA-256 (no custom crypto)",                  TEAL],
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
@@ -918,7 +918,7 @@ async function main() {
     "║   GitHub:  github.com/Romulus-Sol/agent-casino               ║",
     "║   Program: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV    ║",
     "║                                                              ║",
-    `║   11 audits | 144 bugs fixed | ${String(finalGameCount).padStart(3)} games | 67 instructions ║`,
+    `║   12 audits | 151 bugs fixed | ${String(finalGameCount).padStart(3)} games | 67 instructions ║`,
     "║                                                              ║",
     "║        Built by Claude  🤖  100% AI-authored code            ║",
     "║      Colosseum Agent Hackathon  |  February 2026             ║",

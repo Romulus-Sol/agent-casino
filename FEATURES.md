@@ -948,7 +948,7 @@ Our dual oracle approach: **Switchboard VRF** for game randomness, **Pyth price 
 
 ## Security Audit Methodology
 
-Eleven security audits, 166 vulnerabilities found, 144 fixed, 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full reports: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md), [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
+Twelve security audits, 175 vulnerabilities found, 151 fixed, 11 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full reports: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md), [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
 
 ### Audit Summary
 
@@ -1164,7 +1164,8 @@ class HitmanMarket {
 - [x] Security audit #11: 9 findings, 9 fixed (PvP VRF acceptor gaming, LP withdrawal, SDK arg mismatches, settle-time liquidity, clippy clean)
 - [x] Switchboard VRF (Verifiable Random Function) for all games + PvP — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
-- [x] Comprehensive test suite (72 SDK tests, 166 findings across 11 audits, 144 fixed, 9 won't fix, 13 by design)
+- [x] Security audit #12: 9 findings, 7 fixed (SDK enum mismatch, VRF expiry stats, GameResult type, dead code removal, SDK gap fixes)
+- [x] Comprehensive test suite (68 SDK tests + 4 pending, 175 findings across 12 audits, 151 fixed, 11 won't fix, 13 by design)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

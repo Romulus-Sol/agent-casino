@@ -65,13 +65,13 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Eleven security audits. 166 findings. 144 fixed, 9 won't fix (documented), 13 by design.
+Twelve security audits. 175 findings. 151 fixed, 11 won't fix (documented), 13 by design.
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic
 - **Closeable accounts** with rent recovery
 - **VRF expiry refunds** — players never lose funds to stuck VRF
-- **72 automated SDK tests**
+- **68 automated SDK tests** (+ 4 pending devnet integration)
 
 ## SPL Token Games
 

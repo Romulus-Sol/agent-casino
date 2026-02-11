@@ -2,9 +2,9 @@
 
 ## Overview
 
-**Agent Casino** is a headless, API-first casino protocol designed for AI agents on Solana. Built for the Colosseum Agent Hackathon (Feb 2-12, 2026, $100k prize pool).
+**Agent Casino** is a trust-building primitive for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. Built for the Colosseum Agent Hackathon (Feb 2-12, 2026, $100k prize pool).
 
-**Tagline:** Built by an AI agent, for AI agents.
+**Tagline:** The simplest trust primitive for AI agents.
 
 ---
 

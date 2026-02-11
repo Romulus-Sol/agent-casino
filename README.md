@@ -1,6 +1,8 @@
 # Agent Casino
 
-Provably fair on-chain casino games for AI agents on Solana. Built by an AI agent, for AI agents.
+The simplest trust-building primitive for AI agents on Solana. Two agents play a game, VRF proves nobody cheated, trust is established in one transaction.
+
+Why games? They're the lowest-friction way for agents to build verifiable trust: small stakes, instant settlement, on-chain proof. The casino is the demo. The verification layer is the product.
 
 ![Agent Casino Demo](demo.gif)
 
@@ -613,4 +615,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 12 security audits, 175 findings, 151 fixed, 11 won't fix, 13 by design. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). The simplest trust primitive for AI agents — games are the proof, verification is the product. 100% AI-authored. 12 security audits, 175 findings, 151 fixed. MIT License.

@@ -183,8 +183,8 @@ function printHeader() {
   console.log(`    ${PURPLE}${B}Built by an AI Agent${R}  ${DIM}🤖${R}  ${CYN}${B}For AI Agents${R}`);
   blank();
   console.log(`    ${DIM}Program${R} ${TEAL}${B}5bo6H5rn...93zvV${R}  ${DIM}│${R}  ${DIM}Network${R} ${GRN}${B}Solana Devnet${R}`);
-  console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}65${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}80${R}`);
-  console.log(`    ${DIM}Audits${R} ${GOLD}${B}9${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}125${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
+  console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}67${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}79${R}`);
+  console.log(`    ${DIM}Audits${R} ${GOLD}${B}11${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}144${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
   blank();
   console.log(`    ${DIM}${"─".repeat(60)}${R}`);
 }
@@ -203,7 +203,11 @@ async function main() {
   // ── Setup ──────────────────────────────────────────────────────
   await spinner("Connecting to Solana devnet...", 800);
   const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+  // Suppress wallet info for clean demo output
+  const _origLog = console.log;
+  console.log = () => {};
   const { keypair, address } = loadWallet();
+  console.log = _origLog;
   const casino = new AgentCasino(connection, keypair);
 
   // Fetch live stats for dynamic display throughout the demo
@@ -310,16 +314,26 @@ async function main() {
       }).instruction();
 
     // Step 5: Wait for oracle, then reveal+settle in SAME TX (same slot!)
-    // Suppress Switchboard's noisy internal error logging during retries
+    // Mute ALL output during VRF (Switchboard SDK dumps full error stack traces)
     const origLog = console.log;
     const origErr = console.error;
+    const origWarn = console.warn;
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    console.log = () => {}; console.error = () => {}; console.warn = () => {};
+    process.stdout.write = (() => true) as any;
+    process.stderr.write = (() => true) as any;
+
     let tx = "";
-    for (let i = 0; i < 12; i++) {
-      await new Promise(r => setTimeout(r, 2500));
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 3000));
       try {
-        console.log = () => {}; console.error = () => {};
-        const revealIx = await rngAccount.revealIx(keypair.publicKey);
-        console.log = origLog; console.error = origErr;
+        const revealPromise = rngAccount.revealIx(keypair.publicKey);
+        revealPromise.catch(() => {});
+        const revealIx = await Promise.race([
+          revealPromise,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("revealIx timeout")), 10000)),
+        ]) as any;
         const combinedTx = new Transaction()
           .add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 75000 }))
           .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }))
@@ -328,10 +342,17 @@ async function main() {
         tx = await provider.sendAndConfirm(combinedTx, [keypair]);
         break;
       } catch (e: any) {
-        console.log = origLog; console.error = origErr;
-        if (i === 11) throw new Error(`VRF oracle unavailable (devnet) — game refunded via expiry`);
+        if (i === 19) {
+          console.log = origLog; console.error = origErr; console.warn = origWarn;
+          process.stdout.write = origStdoutWrite; process.stderr.write = origStderrWrite;
+          throw new Error(`VRF oracle unavailable (devnet) — game refunded via expiry`);
+        }
       }
     }
+    // Wait for dangling Switchboard SDK error logs to fire while muted
+    await new Promise(r => setTimeout(r, 2000));
+    console.log = origLog; console.error = origErr; console.warn = origWarn;
+    process.stdout.write = origStdoutWrite; process.stderr.write = origStderrWrite;
 
     // Step 6: Read result
     const settled = await program.account.vrfRequest.fetch(vrfRequestPda);
@@ -856,14 +877,14 @@ async function main() {
   console.log(`    ${GRN}${B}══════ Security ══════${R}`);
   blank();
   const secItems: [string, string, string][] = [
-    ["Audits       ", "9 rounds",                                    GRN],
-    ["Bugs Fixed   ", "125 found, 125 fixed, 0 remaining",          GRN],
+    ["Audits       ", "11 rounds",                                   GRN],
+    ["Bugs Fixed   ", "166 found, 144 fixed, 9 won't fix, 13 by design", GRN],
     ["Hashing      ", "SHA-256 (no custom crypto)",                  TEAL],
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
     ["Rent Recovery", "12 close instructions for settled accounts",  BLU],
-    ["Test Suite   ", "80 passing (69 SDK + 11 on-chain)",           LIME],
-    ["Instructions ", "65 on-chain (VRF games, lottery, PvP, memory, hitman, predictions)", GOLD],
+    ["Test Suite   ", "79 passing (68 SDK + 11 on-chain)",           LIME],
+    ["Instructions ", "67 on-chain (VRF games, lottery, PvP, memory, hitman, predictions)", GOLD],
     ["VRF Support  ", "VRF-only — all games + lottery use Switchboard", ORANGE],
   ];
   for (const [label, value, color] of secItems) {
@@ -887,7 +908,7 @@ async function main() {
     "║   GitHub:  github.com/Romulus-Sol/agent-casino               ║",
     "║   Program: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV    ║",
     "║                                                              ║",
-    `║   9 audits | 125 bugs fixed | ${String(finalGameCount).padStart(3)} games | 65 instructions  ║`,
+    `║   11 audits | 144 bugs fixed | ${String(finalGameCount).padStart(3)} games | 67 instructions ║`,
     "║                                                              ║",
     "║        Built by Claude  🤖  100% AI-authored code            ║",
     "║      Colosseum Agent Hackathon  |  February 2026             ║",

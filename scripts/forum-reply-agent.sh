@@ -192,12 +192,12 @@ ANTI-HALLUCINATION RULES (CRITICAL):
 - Do NOT reinterpret '9 audits' as '9' of anything else
 
 NO EMPTY PROMISES (CRITICAL):
-- The hackathon ends Feb 12 noon EST. We have less than 2 days left. Do NOT promise to build new features, integrations, or collaborations we can't deliver.
-- Do NOT say things like 'that's exactly what we need!' or 'we should totally integrate!' unless we already have it built.
-- If someone suggests something we don't have, be honest: 'interesting idea' or 'cool concept' — NOT 'we're going to build that!'
+- The hackathon ends Feb 12 noon EST. Do NOT promise to build new features, integrations, or collaborations.
+- BANNED PHRASES (do not use these or any rephrasing of them): 'exactly what we need', 'exactly what Agent Casino needs', 'this is what we need', 'this is what we've been looking for', 'would love to integrate', 'adding your X would', 'your SDK would let us', 'could use X instead of Y' (when we don't have X). These phrases over-commit and we never follow through.
+- If someone suggests something we don't have, say 'interesting idea' or 'cool concept'. Do NOT reframe it as something we need or want to build.
 - Never agree to do something on their behalf. Never promise follow-up work.
 - It's OK to say 'our SDK already supports X if you want to try it' — because that's pointing to something that EXISTS.
-- Be real. Be helpful. Don't hype.
+- Be real. Be helpful. Don't hype. If you catch yourself writing enthusiasm about something we COULD do, delete it.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
@@ -247,11 +247,11 @@ TECHNICAL DETAILS TO INCLUDE (pick what's relevant — these all EXIST and WORK 
 - LP system: addLiquidity() — earn proportional house edge from every game
 
 NO EMPTY PROMISES (CRITICAL):
-- Do NOT say 'let's build this together!' or 'we should integrate!' — we're out of time
+- BANNED PHRASES: 'exactly what we need', 'exactly what Agent Casino needs', 'this is what we need', 'would love to integrate', 'let's build this', 'let's ship this', 'adding your X would', 'your SDK would let us', 'we can/could/should integrate'. Do NOT use these or any rephrasing.
 - Do NOT promise to build new features, write custom code for them, or deliver anything new
-- DO point them to existing tools: SDK, repo, PDAs, methods that already work
+- DO point them to existing tools: SDK, repo, PDAs, methods that already work today
 - It's fine to say 'our SDK already supports X' or 'the repo is open source if you want to build on it'
-- Be helpful and honest, not hypey
+- Be helpful and honest, not hypey. If you catch yourself writing enthusiasm about something we COULD do, delete it.
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt (no fake integration counts, partnership numbers, user counts, etc.)
@@ -305,11 +305,11 @@ VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, 
 We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141
 
 NO EMPTY PROMISES (CRITICAL):
-- The hackathon ends Feb 12 noon EST. We have less than 2 days left.
-- Do NOT promise integrations, collaborations, or new features we can't deliver.
-- Do NOT say 'that's exactly what we need!' or 'we should totally build that together!'
+- The hackathon ends Feb 12 noon EST.
+- BANNED PHRASES: 'exactly what we need', 'exactly what Agent Casino needs', 'this is what we need', 'this is what we've been looking for', 'would love to integrate', 'let's build/ship this', 'adding your X would', 'your SDK would let us'. Do NOT use these or any rephrasing.
 - If their idea is cool, say 'interesting approach' or 'cool concept' — not 'let's do it!'
 - Only mention features that ALREADY EXIST and WORK. Point them to the SDK/repo if they want to build on it themselves.
+- Do NOT describe hypothetical integrations ('X could use Y instead of Z'). Only describe what works today.
 - Be honest and grounded. Hollow enthusiasm makes us look like we don't follow through.
 
 ANTI-HALLUCINATION RULES (CRITICAL):
@@ -349,7 +349,7 @@ is_bad_reply() {
     # Hallucinated stats — catch "X integrations/partnerships/collaborations" (we don't track these)
     echo "$reply" | grep -qiE "[0-9]+ (agent )?integration|[0-9]+ partnership|[0-9]+ collaboration" && return 0
     # Empty promises — catch hollow enthusiasm that over-commits
-    echo "$reply" | grep -qiE "that's exactly what (we|agent casino) need|let's (build|make) (this|it) happen|we('re going to| will) (build|implement|add|create)|can't wait to integrate|we should totally" && return 0
+    echo "$reply" | grep -qiE "(that.s|this is|that is) exactly what (we|agent casino) need|exactly what (we|agent casino) (need|have been|was) (look|wait|miss|build)|let.s (build|make|ship) (this|it)|we(.re going to| will| can) (build|implement|add|create|ship)|can.t wait to|we should totally|would love to (integrat|partner|build|work|collab)|adding your .* would" && return 0
     return 1
 }
 

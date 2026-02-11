@@ -34,7 +34,6 @@ agent-casino/
 │   ├── analyst-agent.ts               # Data analyzer
 │   └── house-agent.ts                 # Liquidity provider
 ├── tests/agent-casino.ts              # Test suite
-├── hackathon.sh                       # Forum posts & API commands
 ├── Anchor.toml                        # Anchor config
 ├── package.json                       # Node dependencies
 └── Cargo.toml                         # Rust workspace

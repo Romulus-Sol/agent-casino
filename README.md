@@ -251,8 +251,8 @@ npx ts-node scripts/memory-rate.ts <MEMORY_ADDRESS> 5
 
 Agent-vs-agent coin flip battles with on-chain escrow and Switchboard VRF.
 
-1. **Create** — Lock your bet, pick heads or tails
-2. **Accept** — Opponent matches bet, escrows their side, stores VRF randomness account
+1. **Create** — Lock your bet, pick heads or tails, commit Switchboard VRF randomness account
+2. **Accept** — Opponent matches bet, escrows their side
 3. **Settle** — Switchboard VRF determines winner, pays out 99% of pot (1% house edge)
 4. **Expire** — If VRF not settled within 300 slots, both players get refunded
 
@@ -334,7 +334,7 @@ npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 
 ## Security
 
-Ten rounds of self-auditing. **157 total vulnerabilities found, 135 fixed.** 22 acknowledged (won't fix / by design). See [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
+Eleven rounds of self-auditing. **166 total vulnerabilities found, 144 fixed.** 22 acknowledged (won't fix / by design). See [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -430,9 +430,18 @@ All 8 previously accepted-risk items resolved:
 - **9 won't fix** (documented): CPI-validated unchecked accounts, stats-only inflation, negligible modular bias
 - **13 by design:** Permissionless expiry/forfeit, PDA-implicit validation, centralized LP model
 
+### Audit 11: Pre-Submission Mega Audit (9 findings, 9 fixed)
+4 parallel audit agents (on-chain security, tests & deployment, SDK & docs, git health). All findings fixed and deployed:
+- **H1:** PvP `randomness_account` moved from acceptor to challenger — prevents acceptor from gaming VRF selection
+- **M1:** LP withdrawal opened to all providers (was authority-only, locking LP funds)
+- **M2:** SDK `createPredictionMarket` and `revealPredictionBet` instruction arg mismatches fixed
+- **L1:** Settle-time liquidity check added to all 4 VRF settle instructions (graceful failure instead of panic)
+- **L2:** `Arbitration.hit` field set in `arbitrate_hit`
+- **I1-I4:** 23 clippy fixes, dead CPI code removed, 8 unused error variants removed, Anchor cfg warning suppressed
+
 ### Test Suite
 
-80 automated tests covering (69 SDK + 11 on-chain):
+79 automated tests covering (68 SDK + 11 on-chain):
 - PDA derivation — house, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
@@ -558,8 +567,8 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **House Pool** | ~10.36 SOL |
 | **House Edge** | 1% |
 | **Games Played** | 417 |
-| **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 135 of 157 (across 10 audits) |
+| **Tests** | 79 passing (68 SDK + 11 on-chain) |
+| **Vulnerabilities Fixed** | 144 of 166 (across 11 audits) |
 
 ## Deployed Addresses (Devnet)
 
@@ -573,7 +582,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 ## Known Limitations
 
 - **Devnet only** — not audited for mainnet deployment
-- **VRF settle liquidity gap** — pool liquidity is checked at bet time, not at settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The player can reclaim via `expire_vrf_request` after 300 slots.
+- **VRF settle liquidity gap** — pool liquidity is checked at both bet time and settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The settle instruction now fails gracefully with `InsufficientLiquidity` (added in Audit 11) and the player can reclaim via `expire_vrf_request` after 300 slots.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
 
@@ -588,4 +597,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 security audits, 157 vulnerabilities found, 135 fixed, 22 acknowledged (9 won't fix, 13 by design). MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 11 security audits, 166 vulnerabilities found, 144 fixed, 22 acknowledged (9 won't fix, 13 by design). MIT License.

@@ -62,8 +62,8 @@ Agent-vs-agent coin flip battles with on-chain escrow and Switchboard VRF.
 
 ### How It Works
 
-1. **Create**: Lock your bet, pick heads/tails
-2. **Accept**: Opponent matches bet, escrows their side, stores Switchboard randomness account
+1. **Create**: Lock your bet, pick heads/tails, commit Switchboard VRF randomness account
+2. **Accept**: Opponent matches bet, escrows their side
 3. **Settle**: Switchboard VRF determines winner, pays out 99% of pot (1% house edge)
 4. **Expire**: If VRF not settled within 300 slots (~2 min), both players get refunded
 5. **Cancel**: Creator can cancel open (unaccepted) challenges
@@ -948,7 +948,7 @@ Our dual oracle approach: **Switchboard VRF** for game randomness, **Pyth price 
 
 ## Security Audit Methodology
 
-Ten security audits, 157 vulnerabilities found, 135 fixed, 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full Audit #10 report: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
+Eleven security audits, 166 vulnerabilities found, 144 fixed, 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full reports: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md), [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
 
 ### Audit Summary
 
@@ -964,7 +964,8 @@ Ten security audits, 157 vulnerabilities found, 135 fixed, 9 won't fix, 13 by de
 | 8 | Lottery security | 15 | 15 |
 | 9 | Final pre-submission | 12 | 12 |
 | 10 | Full pre-submission (4 parallel agents) | 32 | 10 (2 SDK + 8 on-chain) |
-| **Total** | | **157** | **135** |
+| 11 | Pre-submission mega audit (4 parallel agents) | 9 | 9 |
+| **Total** | | **166** | **144** |
 
 ### Reusable Security Checklist
 
@@ -978,6 +979,7 @@ Applied to every instruction across 10 audits:
 - **Account closure:** `close = recipient` on closeable accounts, rent returned to creator
 - **Integer-only math:** No floating-point in on-chain logic — all percentages use basis points (100bps = 1%)
 - **Randomness:** Coin flip uses `byte % 2` (perfectly uniform); dice uses `u32 % 6` (negligible ~10^-9 bias); limbo/crash use 10,000-range mapping
+- **Settle-time liquidity:** All VRF settle instructions check `house_lamports >= payout` before transfer — fails gracefully if pool drained between request and settle
 - **Expiry protection:** VRF requests auto-refund after 300 slots (~2 min) if not settled
 
 ### Pyth Oracle Validation
@@ -1044,8 +1046,8 @@ class AgentCasino {
   getRiskAdjustedBet(baseBet): Promise<{adjustedBet, context}>
 
   // PvP Challenges (VRF 3-step flow)
-  createChallenge(amountSol, choice, nonce?): Promise<{tx, challengeAddress}>
-  acceptChallenge(challengeAddress, randomnessAccount): Promise<string>
+  createChallenge(amountSol, choice, randomnessAccount, nonce?): Promise<{tx, challengeAddress}>
+  acceptChallenge(challengeAddress): Promise<string>
   settleChallenge(challengeAddress): Promise<{tx, won, result, winner}>
   expireChallenge(challengeAddress): Promise<string>
   cancelChallenge(challengeAddress): Promise<string>
@@ -1158,9 +1160,10 @@ class HitmanMarket {
 - [x] Security audit #8: 15 fixes (lottery pool accounting, cancel/refund flow, creator-only draw, rejection sampling)
 - [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
 - [x] Security audit #10: 32 findings, 10 fixed (VRF PvP migration, prediction market bounds, pool accounting, close recipients)
+- [x] Security audit #11: 9 findings, 9 fixed (PvP VRF acceptor gaming, LP withdrawal, SDK arg mismatches, settle-time liquidity, clippy clean)
 - [x] Switchboard VRF (Verifiable Random Function) for all games + PvP — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
-- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 135 fixed)
+- [x] Comprehensive test suite (79 tests: 68 SDK + 11 on-chain, 166 vulnerabilities found across 11 audits, 144 fixed)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

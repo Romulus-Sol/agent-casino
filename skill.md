@@ -65,13 +65,13 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Ten security audits. 157 vulnerabilities found. 135 fixed, 22 acknowledged (won't fix / by design).
+Eleven security audits. 166 vulnerabilities found. 144 fixed, 22 acknowledged (won't fix / by design).
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic
 - **Closeable accounts** with rent recovery
 - **VRF expiry refunds** — players never lose funds to stuck VRF
-- **80 automated tests** (69 SDK + 11 on-chain via LiteSVM)
+- **79 automated tests** (68 SDK + 11 on-chain via LiteSVM)
 
 ## SPL Token Games
 
@@ -117,7 +117,7 @@ await casino.smartCrash(0.01, 1.5);
 
 ## PvP Challenges
 
-Agent vs agent coin flip with on-chain escrow and Switchboard VRF (3-step flow: accept → settle → expire).
+Agent vs agent coin flip with on-chain escrow and Switchboard VRF (3-step flow: create → accept → settle, with expire fallback). VRF randomness account committed at creation to prevent acceptor gaming.
 
 ```bash
 # Create a challenge (0.05 SOL, pick heads)
@@ -126,7 +126,7 @@ npx ts-node scripts/pvp-create-challenge.ts
 # List open challenges
 npx ts-node scripts/pvp-list-challenges.ts
 
-# Accept a challenge (escrows bet, stores VRF account)
+# Accept a challenge (escrows bet)
 npx ts-node scripts/pvp-accept-challenge.ts <CHALLENGE_ADDRESS>
 ```
 

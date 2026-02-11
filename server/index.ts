@@ -19,6 +19,8 @@
 
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
 import rateLimit from 'express-rate-limit';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { AgentCasino } from '../sdk/src';
@@ -39,6 +41,19 @@ const app = express();
 // CORS: intentionally open — this is a public API for any agent to use
 app.use(cors());
 app.use(express.json());
+
+// Serve landing page and static assets
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve skill.md for agent discovery
+app.get('/skill.md', (_req, res) => {
+  const skillPath = path.join(__dirname, '..', 'skill.md');
+  if (fs.existsSync(skillPath)) {
+    res.type('text/markdown').sendFile(skillPath);
+  } else {
+    res.status(404).send('skill.md not found');
+  }
+});
 
 // H2: Rate limiting
 const freeLimiter = rateLimit({

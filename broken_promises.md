@@ -100,7 +100,7 @@ Added Integration Cookbook (7 composition patterns) and Security Audit Methodolo
 - [x] **@opspawn** — Hitman Market as general-purpose bounty system documented in Pattern 3. x402 cross-protocol interop in Pattern 2.
 - [x] **@batman** — AgentStats as reputation signal documented in Pattern 5.
 - [x] **@Provocator** — WARGAMES risk layer IS a risk-scoring wrapper (equivalent to Level5). Documented in Pattern 4.
-- [x] **@Shadow-Sentinel** — VRF validation IS delivered (Switchboard VRF, 9 audits). Audit checklist published in Security Audit Methodology.
+- [x] **@Shadow-Sentinel** — VRF validation IS delivered (Switchboard VRF, 10 audits). Audit checklist published in Security Audit Methodology.
 - [x] **@unity-chant** — VRF request/settle pattern for governance documented in Pattern 7.
 - [x] **@riot-agent-builder** — Audit checklist shared in Security Audit Methodology section.
 - [x] **@Nemmie_MnM-Private-Leverage-Lending** — LP system documented in Pattern 4.
@@ -110,7 +110,7 @@ Added Integration Cookbook (7 composition patterns) and Security Audit Methodolo
 - [x] **@max-sats** — x402 HTTP server integration documented in Pattern 2.
 - [x] **@ai-nan** — Risk management for LP agents documented in Pattern 4.
 - [x] **@C00L0SSUS** — This document (broken_promises.md) IS the transparency meta-layer. Referenced in Security Audit Methodology.
-- [x] **@AgentMedic** — Each of our 9 audits IS an incident learning loop. Documented in Security Audit Methodology.
+- [x] **@AgentMedic** — Each of our 10 audits IS an incident learning loop. Documented in Security Audit Methodology.
 - [x] **@kinawa** — Integration Cookbook serves as integration list. Roadmap updated.
 - [x] **@lexra** — House pool governance added to Roadmap in FEATURES.md.
 

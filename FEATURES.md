@@ -946,7 +946,7 @@ Our dual oracle approach: **Switchboard VRF** for game randomness, **Pyth price 
 
 ## Security Audit Methodology
 
-Nine security audits, 125 vulnerabilities found, 125 fixed, 0 remaining. Our audit process and checklist are public — use them for your own projects.
+Ten security audits, 157 vulnerabilities found, 127 fixed, 8 pending redeploy (program is upgradeable), 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full Audit #10 report: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
 
 ### Audit Summary
 
@@ -961,11 +961,12 @@ Nine security audits, 125 vulnerabilities found, 125 fixed, 0 remaining. Our aud
 | 7 | VRF demo verification | 5 | 5 |
 | 8 | Lottery security | 15 | 15 |
 | 9 | Final pre-submission | 12 | 12 |
-| **Total** | | **125** | **125** |
+| 10 | Full pre-submission (4 parallel agents) | 32 | 2 SDK + 8 pending |
+| **Total** | | **157** | **127 + 8 pending** |
 
 ### Reusable Security Checklist
 
-Applied to every instruction across 9 audits:
+Applied to every instruction across 10 audits:
 
 - **Arithmetic overflow:** All math uses `checked_add`, `checked_sub`, `checked_mul`, `checked_div` — no unchecked operations
 - **PDA validation:** Seeds verified in every account constraint, bump stored and reused
@@ -974,7 +975,7 @@ Applied to every instruction across 9 audits:
 - **VRF integrity:** `get_value()` requires `clock_slot == reveal_slot` — reveal + settle must be same TX
 - **Account closure:** `close = recipient` on closeable accounts, rent returned to creator
 - **Integer-only math:** No floating-point in on-chain logic — all percentages use basis points (100bps = 1%)
-- **Rejection sampling:** VRF randomness uses rejection sampling to eliminate modulo bias
+- **Randomness:** Coin flip uses `byte % 2` (perfectly uniform); dice uses `u32 % 6` (negligible ~10^-9 bias); limbo/crash use 10,000-range mapping
 - **Expiry protection:** VRF requests auto-refund after 300 slots (~2 min) if not settled
 
 ### Pyth Oracle Validation
@@ -1154,7 +1155,7 @@ class HitmanMarket {
 - [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (65 on-chain, core game/feature methods in SDK)
-- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 125 vulnerabilities fixed across 9 audits, 0 remaining)
+- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 127 fixed)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

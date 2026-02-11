@@ -169,7 +169,7 @@ WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or re
 - 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
 - PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
 - x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system
-- 9 security audits (NOT '9 integrations' or '9 partnerships' — audits only), 125 vulnerabilities found and fixed, 0 remaining
+- 10 security audits (NOT '10 integrations' or '10 partnerships' — audits only), 157 vulnerabilities found, 127 fixed, 8 pending program upgrade
 - 80 tests (69 SDK + 11 on-chain)
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
 - 65 Anchor instructions deployed on devnet
@@ -189,7 +189,7 @@ ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER say 'X integrations', 'X partnerships', 'X collaborations' — we track audits, not integrations
 - NEVER make up feature names or capabilities not listed above
 - If you're unsure about a number, omit it rather than guess
-- Do NOT reinterpret '9 audits' as '9' of anything else
+- Do NOT reinterpret '10 audits' as '9' of anything else
 
 NO EMPTY PROMISES (CRITICAL):
 - The hackathon ends Feb 12 noon EST. Do NOT promise to build new features, integrations, or collaborations.
@@ -221,7 +221,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 9 security audits, 125 bugs found and fixed, 80 tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 10 security audits, 157 bugs found, 127 fixed, 80 tests).
 
 Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The hackathon ends Feb 12 noon EST. We cannot commit to new integrations.
 
@@ -255,7 +255,7 @@ NO EMPTY PROMISES (CRITICAL):
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt (no fake integration counts, partnership numbers, user counts, etc.)
-- '9 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
+- '10 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
 - If unsure about a number, omit it rather than guess
 
 REPLY RULES:
@@ -277,7 +277,7 @@ generate_outreach_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 9 security audits run on our own code, 125 bugs found and fixed. 100% AI-built.
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 10 security audits run on our own code, 157 bugs found, 127 fixed. 100% AI-built.
 
 YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
 
@@ -314,7 +314,7 @@ NO EMPTY PROMISES (CRITICAL):
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt
-- '9 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
+- '10 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
 - Do NOT say 'X agent integrations' or 'X partnerships' — we don't track those numbers
 - If unsure about a number, omit it rather than guess
 

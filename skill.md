@@ -65,7 +65,7 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Nine security audits. 125 vulnerabilities found and fixed. Zero remaining.
+Ten security audits. 157 vulnerabilities found. 127 fixed, 8 pending program upgrade, 22 acknowledged (won't fix / by design).
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic

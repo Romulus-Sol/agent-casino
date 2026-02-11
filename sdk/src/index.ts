@@ -418,6 +418,8 @@ export class AgentCasino {
 
   /**
    * Close a game record to recover rent. Authority only.
+   * NOTE: On-chain program does not constrain recipient — defaults to authority wallet.
+   * Audit #10 M-4: On-chain fix pending to constrain recipient to original player.
    */
   async closeGameRecord(gameIndex: number, recipient?: PublicKey): Promise<string> {
     const [gameRecordPda] = PublicKey.findProgramAddressSync(
@@ -447,6 +449,8 @@ export class AgentCasino {
 
   /**
    * Close a settled VRF request to recover rent. Authority only.
+   * NOTE: On-chain program does not constrain recipient — defaults to authority wallet.
+   * Audit #10 M-4/M-5: On-chain fix pending to constrain recipient + add PDA seeds.
    */
   async closeVrfRequest(vrfRequestAddress: PublicKey, recipient?: PublicKey): Promise<string> {
     const discriminator = Buffer.from([0xe8, 0x5d, 0x65, 0x7c, 0x71, 0xc3, 0x6c, 0xb6]);
@@ -2352,18 +2356,31 @@ export class AgentCasino {
   }
 
   /**
-   * Resolve a prediction market with the winning outcome (authority only)
+   * Resolve a prediction market with the winning outcome (authority only).
+   * WARNING: This is a trusted-authority operation. The winningPool parameter
+   * determines pari-mutuel payouts and must equal the total SOL bet on the
+   * winning project (verifiable off-chain by summing revealed bets).
+   * @param marketAddress - The prediction market PDA address
+   * @param winningProject - Name of the winning project
+   * @param winningPool - Total SOL bet on the winning project (must be <= totalPool)
    */
   async resolvePredictionMarket(
     marketAddress: string,
-    winningProject: string
+    winningProject: string,
+    winningPool?: BN
   ): Promise<string> {
     await this.loadProgram();
     const marketPda = new PublicKey(marketAddress);
     const market = await this.program.account.predictionMarket.fetch(marketPda);
 
+    // Client-side bound check (H-2 mitigation from Audit #10)
+    const pool = winningPool || market.totalPool;
+    if (pool.gt(market.totalPool)) {
+      throw new Error(`winningPool (${pool.toString()}) exceeds totalPool (${market.totalPool.toString()})`);
+    }
+
     return await this.program.methods
-      .resolvePredictionMarket(winningProject, market.totalPool)
+      .resolvePredictionMarket(winningProject, pool)
       .accounts({
         house: this.housePda,
         market: marketPda,

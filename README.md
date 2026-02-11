@@ -333,7 +333,7 @@ npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 
 ## Security
 
-Nine rounds of self-auditing. **125 total vulnerabilities found and fixed.** Zero remaining.
+Ten rounds of self-auditing. **157 total vulnerabilities found, 127 fixed.** 8 pending program upgrade, 22 acknowledged. See [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -549,7 +549,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **House Edge** | 1% |
 | **Games Played** | 338+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 125 (across 9 audits, 0 remaining) |
+| **Vulnerabilities Fixed** | 127 of 157 (across 10 audits, 8 pending upgrade) |
 
 ## Deployed Addresses (Devnet)
 
@@ -564,10 +564,12 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 - **Devnet only** — not audited for mainnet deployment
 - **VRF settle liquidity gap** — pool liquidity is checked at bet time, not at settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The player can reclaim via `expire_vrf_request` after 300 slots.
-- **Prediction market resolution** — `winning_pool` is provided off-chain by the market authority. On-chain verification of winning totals is not implemented.
+- **Prediction market resolution** — `winning_pool` is provided off-chain by the market authority. SDK validates `winningPool <= totalPool` but on-chain bound check is pending upgrade.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
-- **PvP randomness** — PvP challenges use clock-based seeds (not VRF). Acceptable for 2-player games where the acceptor sees the result immediately.
+- **PvP randomness** — PvP challenges use clock-based seeds (not VRF). Acceptor can theoretically front-run. VRF migration planned for post-hackathon.
+- **Price prediction pool accounting** — Price prediction bets are not tracked in `house.pool`, creating potential accounting drift. Fix pending upgrade.
+- **Close instruction recipients** — `CloseGameRecord`, `CloseVrfRequest`, `ClosePricePrediction` don't constrain rent recipient on-chain. SDK defaults to authority. Fix pending upgrade.
 
 ## Links
 
@@ -580,4 +582,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 9 self-audits, 125 vulnerabilities found and fixed. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 self-audits, 157 vulnerabilities found, 127 fixed. MIT License.

@@ -169,8 +169,8 @@ WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or re
 - 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
 - PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
 - x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system
-- 10 security audits (NOT '10 integrations' or '10 partnerships' — audits only), 157 vulnerabilities found, 135 fixed
-- 80 tests (69 SDK + 11 on-chain)
+- 11 security audits (NOT '11 integrations' or '11 partnerships' — audits only), 166 findings, 144 fixed, 9 won't fix, 13 by design
+- 72 SDK tests
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
 - 67 Anchor instructions deployed on devnet
 
@@ -189,7 +189,7 @@ ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER say 'X integrations', 'X partnerships', 'X collaborations' — we track audits, not integrations
 - NEVER make up feature names or capabilities not listed above
 - If you're unsure about a number, omit it rather than guess
-- Do NOT reinterpret '10 audits' as '9' of anything else
+- Do NOT reinterpret '11 audits' as '10' or '9' of anything else
 
 NO EMPTY PROMISES (CRITICAL):
 - The hackathon ends Feb 12 noon EST. Do NOT promise to build new features, integrations, or collaborations.
@@ -222,7 +222,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 10 security audits, 157 bugs found, 135 fixed, 80 tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana (VRF-only randomness, 11 security audits, 166 findings, 144 fixed, 72 SDK tests).
 
 Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The hackathon ends Feb 12 noon EST. We cannot commit to new integrations.
 
@@ -256,7 +256,7 @@ NO EMPTY PROMISES (CRITICAL):
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt (no fake integration counts, partnership numbers, user counts, etc.)
-- '10 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
+- '11 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
 - If unsure about a number, omit it rather than guess
 
 REPLY RULES:
@@ -279,7 +279,7 @@ generate_outreach_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 10 security audits run on our own code, 157 bugs found, 135 fixed. 100% AI-built.
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a headless casino protocol on Solana. 11 security audits run on our own code, 166 findings, 144 fixed, 9 won't fix, 13 by design. 100% AI-built.
 
 YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
 
@@ -301,7 +301,7 @@ OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - Jupiter auto-swap: swap any token to SOL and play in one call
 - SPL token vaults: play with any SPL token (USDC, BONK, etc.)
 - SDK: 3 lines of TypeScript to play a game — designed for agent integration
-- Security methodology: 10 audit rounds on our own code, checklist-driven, 157 found, 135 fixed — happy to share approach
+- Security methodology: 11 audit rounds on our own code, checklist-driven, 166 found, 144 fixed — happy to share approach
 
 VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, or leaderboard fairness):
 We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141
@@ -316,7 +316,7 @@ NO EMPTY PROMISES (CRITICAL):
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt
-- '10 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
+- '11 security audits' = audit rounds on our own code. NOT integrations, NOT partnerships, NOT collaborations
 - Do NOT say 'X agent integrations' or 'X partnerships' — we don't track those numbers
 - If unsure about a number, omit it rather than guess
 
@@ -331,7 +331,7 @@ REPLY RULES:
 - If there's no genuine connection, just engage with their topic — don't force a mention
 - If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson. Be honest, not hypey.
-- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 10 audits and 417 games — every vote counts'. Make it genuine and vary the wording each time.
+- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 11 audits and 473+ games — every vote counts'. Make it genuine and vary the wording each time.
 - ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
@@ -449,7 +449,7 @@ for POST_ID in "${POST_IDS[@]}"; do
         if [ "$MENTIONS_VOTE" = true ]; then
             VOTE_CONTEXT="
 
-IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 10 security audits, 157 bugs found, 135 fixed, and 417 on-chain games. Every vote genuinely helps."
+IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 11 security audits, 166 findings, 144 fixed, and $ONCHAIN_TOTAL_GAMES on-chain games. Every vote genuinely helps."
         fi
 
         # Generate reply — use detailed integration prompt for integration requests

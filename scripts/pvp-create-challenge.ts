@@ -56,6 +56,7 @@ async function main() {
       .accounts({
         house: housePda,
         challenge: challengePda,
+        randomnessAccount: new PublicKey(process.argv[2] || "11111111111111111111111111111111"), // pass Switchboard randomness account as CLI arg
         challenger: walletKeypair.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })

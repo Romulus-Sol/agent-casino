@@ -85,7 +85,7 @@ async function main() {
 
   try {
     const tx = await program.methods
-      .acceptChallenge(Array.from(clientSeed))
+      .acceptChallenge()
       .accounts({
         house: housePda,
         challenge: challengePda,

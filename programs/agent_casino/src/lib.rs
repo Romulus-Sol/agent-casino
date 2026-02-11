@@ -270,6 +270,8 @@ pub mod agent_casino {
         challenge.winner = Pubkey::default();
         challenge.result = 0;
         challenge.nonce = nonce;
+        challenge.randomness_account = ctx.accounts.randomness_account.key();
+        challenge.request_slot = clock.slot;
         challenge.bump = ctx.bumps.challenge;
 
         emit!(ChallengeCreated {
@@ -304,17 +306,13 @@ pub mod agent_casino {
         );
         system_program::transfer(cpi_context, amount)?;
 
-        // Store VRF account and mark as accepted
-        let clock = Clock::get()?;
+        // Mark as accepted (randomness account was committed at creation time)
         let challenge_key = ctx.accounts.challenge.key();
         let acceptor_key = ctx.accounts.acceptor.key();
-        let randomness_key = ctx.accounts.randomness_account.key();
         let challenge = &mut ctx.accounts.challenge;
         let challenger_key = challenge.challenger;
         challenge.status = ChallengeStatus::Accepted;
         challenge.acceptor = acceptor_key;
-        challenge.randomness_account = randomness_key;
-        challenge.request_slot = clock.slot;
 
         emit!(ChallengeAccepted {
             challenge_id: challenge_key,
@@ -1586,6 +1584,7 @@ pub mod agent_casino {
 
         // Now do mutable updates
         let arbitration = &mut ctx.accounts.arbitration;
+        arbitration.hit = ctx.accounts.hit.key();
         arbitration.arbiters.push(ctx.accounts.arbiter.key());
         arbitration.stakes.push(stake_amount);
         if vote_approve {
@@ -1890,8 +1889,10 @@ pub mod agent_casino {
             0
         };
 
-        // Transfer payout if won
+        // Transfer payout if won (check actual lamport balance at settle time)
         if won && payout > 0 {
+            let house_lamports = ctx.accounts.house.to_account_info().lamports();
+            require!(house_lamports >= payout, CasinoError::InsufficientLiquidity);
             **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
@@ -2029,6 +2030,8 @@ pub mod agent_casino {
         };
 
         if won && payout > 0 {
+            let house_lamports = ctx.accounts.house.to_account_info().lamports();
+            require!(house_lamports >= payout, CasinoError::InsufficientLiquidity);
             **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
@@ -2165,6 +2168,8 @@ pub mod agent_casino {
         };
 
         if won && payout > 0 {
+            let house_lamports = ctx.accounts.house.to_account_info().lamports();
+            require!(house_lamports >= payout, CasinoError::InsufficientLiquidity);
             **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
@@ -2302,6 +2307,8 @@ pub mod agent_casino {
         };
 
         if won && payout > 0 {
+            let house_lamports = ctx.accounts.house.to_account_info().lamports();
+            require!(house_lamports >= payout, CasinoError::InsufficientLiquidity);
             **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= payout;
             **ctx.accounts.player.to_account_info().try_borrow_mut_lamports()? += payout;
         }
@@ -3050,10 +3057,7 @@ pub struct RemoveLiquidity<'info> {
     )]
     pub lp_position: Account<'info, LpPosition>,
 
-    #[account(
-        mut,
-        constraint = provider.key() == house.authority @ CasinoError::NotAuthority
-    )]
+    #[account(mut)]
     pub provider: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -3118,6 +3122,9 @@ pub struct CreateChallenge<'info> {
     )]
     pub challenge: Account<'info, Challenge>,
 
+    /// CHECK: Switchboard randomness account — committed at creation to prevent acceptor gaming
+    pub randomness_account: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub challenger: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -3130,9 +3137,6 @@ pub struct AcceptChallenge<'info> {
         constraint = challenge.status == ChallengeStatus::Open @ CasinoError::ChallengeNotOpen
     )]
     pub challenge: Account<'info, Challenge>,
-
-    /// CHECK: Switchboard randomness account — stored for settle phase
-    pub randomness_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub acceptor: Signer<'info>,
@@ -5397,8 +5401,6 @@ pub enum CasinoError {
     MarketNotOpen,
     #[msg("Invalid project slug (1-50 chars)")]
     InvalidProjectSlug,
-    #[msg("Betting has closed")]
-    BettingClosed,
     #[msg("Only market authority can resolve")]
     NotMarketAuthority,
     #[msg("Market has not been resolved")]
@@ -5411,8 +5413,6 @@ pub enum CasinoError {
     DidNotWin,
     #[msg("Not the bet owner")]
     NotBetOwner,
-    #[msg("Cannot change bet outcome after placing")]
-    CannotChangeBetOutcome,
     // Commit-reveal errors
     #[msg("Reveal deadline must be after commit deadline")]
     RevealMustBeAfterCommit,
@@ -5436,8 +5436,6 @@ pub enum CasinoError {
     InvalidReveal,
     #[msg("Bet was not revealed")]
     BetNotRevealed,
-    #[msg("No winning bets - cannot claim")]
-    NoWinningBets,
     // Memory Slots errors
     #[msg("Memory content invalid (must be 1-500 chars)")]
     MemoryContentInvalid,
@@ -5486,21 +5484,10 @@ pub enum CasinoError {
     AlreadyVotedArbitration,
     #[msg("Arbitration panel is full")]
     ArbitrationFull,
-    #[msg("Invalid arbiter")]
-    InvalidArbiter,
     #[msg("Hit pool mismatch")]
     HitPoolMismatch,
     #[msg("Stake amount too low")]
     StakeTooLow,
-    // Multi-token errors
-    #[msg("Token vault not initialized for this mint")]
-    TokenVaultNotInitialized,
-    #[msg("Invalid token mint")]
-    InvalidMint,
-    #[msg("Token vault mismatch")]
-    TokenVaultMismatch,
-    #[msg("Insufficient token balance")]
-    InsufficientTokenBalance,
     // Switchboard VRF errors
     #[msg("VRF request already settled")]
     VrfAlreadySettled,

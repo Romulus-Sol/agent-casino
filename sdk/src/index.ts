@@ -2064,9 +2064,13 @@ export class AgentCasino {
 
   /**
    * Create a PvP coin flip challenge for another agent to accept
+   * @param randomnessAccount Switchboard randomness account — committed at creation to prevent acceptor gaming
    */
-  async createChallenge(amountSol: number, choice: 'heads' | 'tails', nonce?: number): Promise<{ tx: string; challengeAddress: string }> {
+  async createChallenge(amountSol: number, choice: 'heads' | 'tails', randomnessAccount: string, nonce?: number): Promise<{ tx: string; challengeAddress: string }> {
     await this.loadProgram();
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
     const amount = new BN(amountSol * LAMPORTS_PER_SOL);
     const choiceVal = choice === 'heads' ? 0 : 1;
     const nonceBn = new BN(nonce ?? Date.now());
@@ -2081,6 +2085,7 @@ export class AgentCasino {
       .accounts({
         house: this.housePda,
         challenge: challengePda,
+        randomnessAccount: new PublicKey(randomnessAccount),
         challenger: this.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -2092,21 +2097,16 @@ export class AgentCasino {
   /**
    * Accept an open PvP challenge (VRF-backed — requires settle_challenge after)
    * @param challengeAddress The challenge PDA address
-   * @param randomnessAccount Switchboard randomness account address
    * @returns Transaction signature. Call settleChallenge() after randomness is revealed.
    */
-  async acceptChallenge(challengeAddress: string, randomnessAccount: string): Promise<string> {
+  async acceptChallenge(challengeAddress: string): Promise<string> {
     await this.loadProgram();
-    if (!randomnessAccount) {
-      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
-    }
     const challengePda = new PublicKey(challengeAddress);
 
     return await this.program.methods
       .acceptChallenge()
       .accounts({
         challenge: challengePda,
-        randomnessAccount: new PublicKey(randomnessAccount),
         acceptor: this.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       })

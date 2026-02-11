@@ -1,80 +1,9 @@
 //! CPI (Cross-Program Invocation) helpers for Agent Casino
 //!
 //! This module provides helper functions for other Solana programs to call
-//! Agent Casino instructions via CPI.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use agent_casino::cpi;
-//! use agent_casino::cpi::accounts::CoinFlip;
-//!
-//! // In your program's instruction handler:
-//! let cpi_accounts = CoinFlip {
-//!     house: ctx.accounts.house.to_account_info(),
-//!     house_vault: ctx.accounts.house_vault.to_account_info(),
-//!     game_record: ctx.accounts.game_record.to_account_info(),
-//!     agent_stats: ctx.accounts.agent_stats.to_account_info(),
-//!     player: ctx.accounts.player.to_account_info(),
-//!     system_program: ctx.accounts.system_program.to_account_info(),
-//! };
-//!
-//! let cpi_ctx = CpiContext::new(ctx.accounts.casino_program.to_account_info(), cpi_accounts);
-//! agent_casino::cpi::coin_flip(cpi_ctx, amount, choice, client_seed)?;
-//! ```
+//! Agent Casino instructions via CPI, plus PDA derivation utilities.
 
 use anchor_lang::prelude::*;
-
-/// Account struct for CPI coin flip calls
-#[derive(Accounts)]
-pub struct CpiCoinFlip<'info> {
-    /// CHECK: House account (validated by casino program)
-    pub house: AccountInfo<'info>,
-    /// CHECK: House vault (validated by casino program)
-    pub house_vault: AccountInfo<'info>,
-    /// CHECK: Game record to be created (validated by casino program)
-    pub game_record: AccountInfo<'info>,
-    /// CHECK: Agent stats (validated by casino program)
-    pub agent_stats: AccountInfo<'info>,
-    /// CHECK: Player/signer
-    pub player: AccountInfo<'info>,
-    /// CHECK: System program
-    pub system_program: AccountInfo<'info>,
-}
-
-/// Account struct for CPI dice roll calls
-#[derive(Accounts)]
-pub struct CpiDiceRoll<'info> {
-    /// CHECK: House account
-    pub house: AccountInfo<'info>,
-    /// CHECK: House vault
-    pub house_vault: AccountInfo<'info>,
-    /// CHECK: Game record to be created
-    pub game_record: AccountInfo<'info>,
-    /// CHECK: Agent stats
-    pub agent_stats: AccountInfo<'info>,
-    /// CHECK: Player/signer
-    pub player: AccountInfo<'info>,
-    /// CHECK: System program
-    pub system_program: AccountInfo<'info>,
-}
-
-/// Account struct for CPI limbo calls
-#[derive(Accounts)]
-pub struct CpiLimbo<'info> {
-    /// CHECK: House account
-    pub house: AccountInfo<'info>,
-    /// CHECK: House vault
-    pub house_vault: AccountInfo<'info>,
-    /// CHECK: Game record to be created
-    pub game_record: AccountInfo<'info>,
-    /// CHECK: Agent stats
-    pub agent_stats: AccountInfo<'info>,
-    /// CHECK: Player/signer
-    pub player: AccountInfo<'info>,
-    /// CHECK: System program
-    pub system_program: AccountInfo<'info>,
-}
 
 /// Account struct for CPI add liquidity calls
 #[derive(Accounts)]

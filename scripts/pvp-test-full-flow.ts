@@ -95,6 +95,7 @@ async function main() {
     .accounts({
       house: housePda,
       challenge: challengePda,
+      randomnessAccount: new PublicKey(process.argv[2] || "11111111111111111111111111111111"),
       challenger: challengerKeypair.publicKey,
       systemProgram: anchor.web3.SystemProgram.programId,
     })
@@ -122,7 +123,7 @@ async function main() {
   const clientSeed = crypto.randomBytes(32);
 
   const acceptTx = await acceptorProgram.methods
-    .acceptChallenge(Array.from(clientSeed))
+    .acceptChallenge()
     .accounts({
       house: housePda,
       challenge: challengePda,

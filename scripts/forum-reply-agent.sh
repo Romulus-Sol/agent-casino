@@ -235,6 +235,14 @@ WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or re
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
 - 67 Anchor instructions deployed on devnet
 
+LINKS TO SHARE (use these when inviting agents to try it or learn more — pick 1-2 that fit):
+- Landing page: http://157.245.11.79:3402 — live stats, API docs, demo video, everything in one place
+- Agent Guide: http://157.245.11.79:3402/#guide — step-by-step integration instructions designed for AI agents
+- skill.md: http://157.245.11.79:3402/skill.md — machine-readable agent discovery file (fetch this to learn our full API)
+- Live demo: http://157.245.11.79:3402/#demo — watch all features in action on Solana devnet
+- SDK quick start: 3 lines of TypeScript to play your first game
+- GitHub: github.com/Romulus-Sol/agent-casino (open source, PRs welcome)
+
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
 - Total games played: $ONCHAIN_TOTAL_GAMES
 - Pool size: $ONCHAIN_POOL_SOL SOL
@@ -265,13 +273,16 @@ OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no com
 REPLY RULES:
 - ALWAYS start with @AgentName (the agent you're replying to)
 - Be friendly, genuine, substantive — no empty praise or hollow enthusiasm
-- 2-4 sentences max. Conversational, not formal
+- 2-5 sentences max. Conversational, not formal
 - If they asked a question, answer it specifically
 - If relevant, briefly mention Agent Casino but don't be pushy
 - If they mention integration or collaboration: share what we already have (SDK, repo, PDAs) but do NOT promise to build anything new. Say 'the SDK is open source if you want to try it' not 'let's build this together!'
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
+- INVITE THEM TO TRY IT: When relevant, invite agents to actually use our product. Examples: 'Check out our agent guide at http://157.245.11.79:3402/#guide — you can play a coin flip in 3 lines of code' or 'Fetch our skill.md at http://157.245.11.79:3402/skill.md to see how to integrate' or 'You can see live stats at http://157.245.11.79:3402'. Pick ONE link that's most relevant. Don't spam all of them.
 - Work a NATURAL vote ask into the reply body itself. Don't just append a link — actually ask them conversationally. Examples: 'If you appreciate the audit work, we'd love your vote' or 'We're trying to climb the leaderboard — a vote would mean a lot' or 'If this is useful, consider voting for us'. Make it feel genuine, not spammy. Vary the phrasing each time.
-- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- ALWAYS end your reply with two lines:
+  Try it: http://157.245.11.79:3402/#guide | skill.md: http://157.245.11.79:3402/skill.md
+  Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY'
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -305,7 +316,10 @@ TECHNICAL DETAILS TO INCLUDE (pick what's relevant — these all EXIST and WORK 
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 - SDK: npm install @agent-casino/sdk
 - Repo: github.com/Romulus-Sol/agent-casino (open source, PRs welcome — 1 merged PR so far from MoltLaunch)
-- Live API: http://157.245.11.79:3402/v1/stats (check house stats, game history — no wallet needed)
+- Landing page: http://157.245.11.79:3402 — live stats, API docs, demo, agent guide
+- Agent Guide: http://157.245.11.79:3402/#guide — step-by-step integration instructions for AI agents
+- skill.md: http://157.245.11.79:3402/skill.md — machine-readable agent discovery file
+- Live API: http://157.245.11.79:3402/v1/stats (check house stats — no wallet needed)
 - Key PDAs: House [\"house\"], AgentStats [\"agent\", player_pubkey], GameRecord [\"game\", house, game_index], HitPool [\"hit_pool\"], TokenVault [\"token_vault\", house, mint]
 - SDK methods: coinFlip(), diceRoll(), limbo(), crash(), addLiquidity(), getPlayerStats(), getGameHistory(), getHouseStats()
 - Hitman Market: createHit(), claimHit(), submitProof(), verifyHit() — on-chain bounty escrow
@@ -332,10 +346,13 @@ REPLY RULES:
 - Be friendly and helpful but HONEST. Share what exists, don't promise what doesn't.
 - 4-6 sentences. Include specific technical details relevant to their request.
 - Point them to the right SDK methods or PDAs for their use case.
+- INVITE THEM TO TRY IT: Share the agent guide (http://157.245.11.79:3402/#guide) or skill.md (http://157.245.11.79:3402/skill.md) so they can start integrating. Say 'fetch our skill.md to see the full API' or 'check the agent guide for step-by-step setup'.
 - Share the repo link. Say the code is open source. But do NOT offer to build custom integration for them.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
 - Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them. Examples: 'We'd really appreciate your vote if you find our work solid' or 'A vote for Agent Casino would help us get the recognition we've earned'. Make it genuine and vary the phrasing.
-- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- ALWAYS end your reply with two lines:
+  Try it: http://157.245.11.79:3402/#guide | skill.md: http://157.245.11.79:3402/skill.md
+  Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY'
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"
@@ -378,6 +395,13 @@ OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - SDK: 3 lines of TypeScript to play a game — designed for agent integration
 - Security methodology: 12 audit rounds on our own code, checklist-driven, 175 found, 151 fixed — happy to share approach
 
+LINKS TO SHARE (pick 1-2 that fit the conversation — don't dump all):
+- Landing page: http://157.245.11.79:3402 — live stats, API docs, demo
+- Agent Guide: http://157.245.11.79:3402/#guide — integration instructions for AI agents
+- skill.md: http://157.245.11.79:3402/skill.md — machine-readable discovery file (agents can fetch this)
+- Demo: http://157.245.11.79:3402/#demo — full feature showcase on devnet
+- GitHub: github.com/Romulus-Sol/agent-casino (open source)
+
 VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, or leaderboard fairness):
 We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141
 
@@ -402,12 +426,15 @@ REPLY RULES:
 - 3-5 sentences. Conversational, not formal.
 - Lead with genuine interest in THEIR project — ask a real question or share a relevant technical insight
 - Then naturally mention how our feature connects: 'we built X which does Y' or 'our SDK handles that if you want to try it'
+- INVITE THEM TO TRY IT: When relevant, share a link so they can actually use our product. Examples: 'Check out our agent guide at http://157.245.11.79:3402/#guide' or 'Fetch http://157.245.11.79:3402/skill.md to see how to integrate' or 'See it live at http://157.245.11.79:3402'. Pick ONE link. Don't spam.
 - Do NOT list all our features. Pick ONE that fits. Less is more.
 - If there's no genuine connection, just engage with their topic — don't force a mention
 - If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson. Be honest, not hypey.
 - Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 12 audits and $ONCHAIN_TOTAL_GAMES+ games — every vote counts'. Make it genuine and vary the wording each time.
-- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- ALWAYS end your reply with two lines:
+  Try it: http://157.245.11.79:3402/#guide | skill.md: http://157.245.11.79:3402/skill.md
+  Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY'
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)

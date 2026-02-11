@@ -1163,7 +1163,7 @@ class HitmanMarket {
 - [x] Security audit #11: 9 findings, 9 fixed (PvP VRF acceptor gaming, LP withdrawal, SDK arg mismatches, settle-time liquidity, clippy clean)
 - [x] Switchboard VRF (Verifiable Random Function) for all games + PvP — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
-- [x] Comprehensive test suite (79 tests: 68 SDK + 11 on-chain, 166 vulnerabilities found across 11 audits, 144 fixed)
+- [x] Comprehensive test suite (72 SDK tests, 166 findings across 11 audits, 144 fixed, 9 won't fix, 13 by design)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

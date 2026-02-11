@@ -336,7 +336,7 @@ npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 
 ## Security
 
-Eleven rounds of self-auditing. **166 total vulnerabilities found, 144 fixed.** 22 acknowledged (won't fix / by design). See [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
+Eleven rounds of self-auditing. **166 total findings, 144 fixed.** 9 won't fix (documented), 13 by design. See [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -443,7 +443,7 @@ All 8 previously accepted-risk items resolved:
 
 ### Test Suite
 
-79 automated tests covering (68 SDK + 11 on-chain):
+72 automated SDK tests covering:
 - PDA derivation — house, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
@@ -568,8 +568,8 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~10.36 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 417 |
-| **Tests** | 79 passing (68 SDK + 11 on-chain) |
+| **Games Played** | 473+ |
+| **Tests** | 72 SDK tests |
 | **Vulnerabilities Fixed** | 144 of 166 (across 11 audits) |
 
 ## Deployed Addresses (Devnet)
@@ -590,7 +590,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ## Links
 
-- [Live Demo](https://asciinema.org/a/aZRBTIEl7FSKnsWw) — Full feature showcase (all 4 VRF games, PvP, Memory Slots, Hitman, Pyth predictions, WARGAMES)
+- [Live Demo](https://asciinema.org/a/Zv38A01FdITepqRi) — Full feature showcase (all 4 VRF games, PvP, Lottery, Memory Slots, Hitman, Pyth predictions, WARGAMES)
 - [Skill File](skill.md) — For agent discovery and integration
 - [Full Feature Docs](FEATURES.md) — API reference and detailed docs
 - [GitHub](https://github.com/Romulus-Sol/agent-casino)
@@ -599,4 +599,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 11 security audits, 166 vulnerabilities found, 144 fixed, 22 acknowledged (9 won't fix, 13 by design). MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 11 security audits, 166 findings, 144 fixed, 9 won't fix, 13 by design. MIT License.

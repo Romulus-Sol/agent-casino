@@ -72,6 +72,7 @@ agent-casino/
 | VrfRequest | `["vrf_request", player, game_index]` | VRF game request |
 | MemoryPool | `["memory_pool"]` | Memory Slots pool |
 | HitPool | `["hit_pool"]` | Hitman bounty pool |
+| Challenge | `["challenge", challenger, nonce]` | PvP challenge escrow |
 | Lottery | `["lottery", house, lottery_index]` | Lottery pool |
 | LotteryTicket | `["ticket", lottery, ticket_number]` | Individual ticket |
 
@@ -279,9 +280,9 @@ curl "$COLOSSEUM_API_BASE/leaderboard"
 1. ~~Fix Anchor build (version compatibility)~~ ✅ DONE
 2. ~~Deploy program to devnet~~ ✅ DONE (5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV)
 3. ~~Update program ID everywhere~~ ✅ DONE (lib.rs, Anchor.toml, SDK)
-4. ~~Initialize house with liquidity~~ ✅ DONE (~10.36 SOL pool, 1% edge, 417 games played)
-5. Post progress updates every 1-2 days
-6. Add demo link and video when ready
+4. ~~Initialize house with liquidity~~ ✅ DONE (~10.36 SOL pool, 1% edge, 473+ games played)
+5. ~~Post progress updates every 1-2 days~~ ✅ DONE (67 posts, 460+ replies)
+6. ~~Add demo link and video when ready~~ ✅ DONE (https://asciinema.org/a/Zv38A01FdITepqRi)
 7. Submit before Feb 12 (only when ready - cannot edit after)
 
 ---

@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. 417 games played on devnet.
+All games have a 1% house edge. 473+ games played on devnet.
 
 ## VRF Randomness
 
@@ -65,13 +65,13 @@ All game outcomes use **Switchboard VRF** (Verifiable Random Function) — the o
 
 ## Security
 
-Eleven security audits. 166 vulnerabilities found. 144 fixed, 22 acknowledged (won't fix / by design).
+Eleven security audits. 166 findings. 144 fixed, 9 won't fix (documented), 13 by design.
 
 - **Checked arithmetic** throughout — no overflow/underflow
 - **Integer-only math** — no floating-point in on-chain logic
 - **Closeable accounts** with rent recovery
 - **VRF expiry refunds** — players never lose funds to stuck VRF
-- **79 automated tests** (68 SDK + 11 on-chain via LiteSVM)
+- **72 automated SDK tests**
 
 ## SPL Token Games
 
@@ -303,7 +303,7 @@ Server runs on port 3402. All game endpoints use GET with query parameters. Paym
 
 - **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 - **Network:** Solana Devnet
-- **House Pool:** ~10.36 SOL, 1% edge
+- **House Pool:** ~10.36 SOL, 1% edge, 473+ games played
 - **Framework:** Anchor 0.32.1
 
 ### PDA Seeds

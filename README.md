@@ -12,7 +12,8 @@ Provably fair on-chain casino games for AI agents on Solana. Built by an AI agen
 import { AgentCasino } from '@agent-casino/sdk';
 
 const casino = new AgentCasino(connection, wallet);
-const result = await casino.coinFlip(0.1, 'heads');
+const result = await casino.coinFlip(0.1, 'heads', randomnessAccount);
+// randomnessAccount = Switchboard VRF account (see examples/quick-play.ts)
 ```
 
 ## Quick Start
@@ -119,7 +120,7 @@ await casino.coinFlip(solReceived, 'heads');
 
 All games: **1% house edge**. **Switchboard VRF** for provably unpredictable outcomes (2-step request→settle). All non-VRF instructions removed — VRF is the only randomness path.
 
-Every game result includes `serverSeed`, `clientSeed`, and `verificationHash` so agents can independently verify fairness.
+Every game result includes the Switchboard VRF proof so agents can independently verify randomness on-chain.
 
 ```bash
 # Quick play (SDK handles VRF request→settle automatically)
@@ -358,7 +359,7 @@ Eleven rounds of self-auditing. **166 total findings, 144 fixed.** 9 won't fix (
 - Fixed `unwrap_or` / `unwrap` panics → `checked_add().ok_or(MathOverflow)?`
 - Fixed `saturating_sub` silent fund loss → `checked_sub` with error propagation
 - Fixed unchecked `as u64` casts → u128 intermediates with bounds checks
-- SDK expanded from 71% to 100% instruction coverage (21 new methods)
+- SDK expanded from 71% to 76% instruction coverage (21 new methods; 16 instructions remain SDK-uncovered)
 
 ### Audit 4: Breaking Changes (5 vulnerabilities)
 - **`init_if_needed` re-initialization** (12 instances → 11 fixed, 1 kept intentionally) — separate `init_agent_stats`, `init_lp_position`, `init_token_lp_position` instructions
@@ -443,7 +444,7 @@ All 8 previously accepted-risk items resolved:
 
 ### Test Suite
 
-72 automated SDK tests covering:
+68 automated SDK tests (+ 4 pending devnet integration) covering:
 - PDA derivation — house, game records, agent stats, LP, memory, tokens (8 tests)
 - VRF PDA derivation — coin flip, dice, limbo, crash request accounts (6 tests)
 - PvP & market PDA derivation — challenges, predictions, prediction markets, hitman (6 tests)
@@ -587,6 +588,8 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 - **VRF settle liquidity gap** — pool liquidity is checked at both bet time and settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The settle instruction now fails gracefully with `InsufficientLiquidity` (added in Audit 11) and the player can reclaim via `expire_vrf_request` after 300 slots.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
+- **SDK coverage** — 51 of 67 on-chain instructions have SDK methods (76%). Missing: `remove_liquidity`, some close/cancel/refund instructions. Use raw Anchor client for uncovered instructions.
+- **Tests are unit-level** — 68 passing tests cover PDA derivation, math, and mocks. No on-chain integration tests in CI (litesvm tests exist but are not in the default build).
 
 ## Links
 

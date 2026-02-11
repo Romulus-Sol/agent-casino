@@ -2050,12 +2050,13 @@ export class AgentCasino {
     return { agent, totalGames, totalWagered, totalWon, wins, losses, pvpGames, pvpWins, bump };
   }
 
-  private parseGameType(type: number): 'CoinFlip' | 'DiceRoll' | 'Limbo' | 'Crash' {
+  private parseGameType(type: number): 'CoinFlip' | 'DiceRoll' | 'Limbo' | 'PvPChallenge' | 'Crash' {
     switch (type) {
       case 0: return 'CoinFlip';
       case 1: return 'DiceRoll';
       case 2: return 'Limbo';
-      case 3: return 'Crash';
+      case 3: return 'PvPChallenge';
+      case 4: return 'Crash';
       default: return 'CoinFlip';
     }
   }

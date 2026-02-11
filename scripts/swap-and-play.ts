@@ -59,7 +59,7 @@ async function main() {
   console.log(`  Game: ${game}`);
   console.log(`  Won: ${result.won}`);
   console.log(`  Payout: ${result.payout} SOL`);
-  console.log(`  Tx: ${result.txSignature}`);
+  console.log(`  Tx: ${result.signature}`);
 }
 
 main().catch(console.error);

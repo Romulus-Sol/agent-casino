@@ -967,11 +967,12 @@ Twelve security audits, 175 vulnerabilities found, 151 fixed, 11 won't fix, 13 b
 | 9 | Final pre-submission | 12 | 12 |
 | 10 | Full pre-submission (4 parallel agents) | 32 | 10 (2 SDK + 8 on-chain) |
 | 11 | Pre-submission mega audit (4 parallel agents) | 9 | 9 |
-| **Total** | | **166** | **144** |
+| 12 | Final sweep (SDK enum, VRF expiry stats, GameResult type) | 9 | 7 |
+| **Total** | | **175** | **151** |
 
 ### Reusable Security Checklist
 
-Applied to every instruction across 10 audits:
+Applied to every instruction across 12 audits:
 
 - **Arithmetic overflow:** All math uses `checked_add`, `checked_sub`, `checked_mul`, `checked_div` — no unchecked operations
 - **PDA validation:** Seeds verified in every account constraint, bump stored and reused

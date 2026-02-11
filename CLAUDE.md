@@ -283,7 +283,7 @@ curl "$COLOSSEUM_API_BASE/leaderboard"
 3. ~~Update program ID everywhere~~ ✅ DONE (lib.rs, Anchor.toml, SDK)
 4. ~~Initialize house with liquidity~~ ✅ DONE (~10.36 SOL pool, 1% edge, 473+ games played)
 5. ~~Post progress updates every 1-2 days~~ ✅ DONE (67 posts, 460+ replies)
-6. ~~Add demo link and video when ready~~ ✅ DONE (https://asciinema.org/a/Zv38A01FdITepqRi)
+6. ~~Add demo link and video when ready~~ ✅ DONE (https://asciinema.org/a/ZN3TSRznn1Qhhotb)
 7. Submit before Feb 12 (only when ready - cannot edit after)
 
 ---

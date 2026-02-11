@@ -60,7 +60,7 @@ curl http://localhost:3402/v1/games/coinflip?choice=heads
 # Agent creates USDC transfer tx, signs it, retries with X-Payment header
 curl -H "X-Payment: <base64-encoded-signed-tx>" \
   http://localhost:3402/v1/games/coinflip?choice=heads
-# → 200: { won: true, payout: 0.00198, txSignature: "...", verificationHash: "..." }
+# → 200: { won: true, payout: 0.00198, signature: "...", gameType: "CoinFlip" }
 ```
 
 **Endpoints:**
@@ -337,7 +337,7 @@ npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 
 ## Security
 
-Eleven rounds of self-auditing. **166 total findings, 144 fixed.** 9 won't fix (documented), 13 by design. See [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
+Twelve rounds of self-auditing. **175 total findings, 151 fixed.** 11 won't fix (documented), 13 by design. See [SECURITY_AUDIT_11.md](./SECURITY_AUDIT_11.md).
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -359,7 +359,7 @@ Eleven rounds of self-auditing. **166 total findings, 144 fixed.** 9 won't fix (
 - Fixed `unwrap_or` / `unwrap` panics → `checked_add().ok_or(MathOverflow)?`
 - Fixed `saturating_sub` silent fund loss → `checked_sub` with error propagation
 - Fixed unchecked `as u64` casts → u128 intermediates with bounds checks
-- SDK expanded from 71% to 76% instruction coverage (21 new methods; 16 instructions remain SDK-uncovered)
+- SDK expanded from 71% to 79% instruction coverage (23 new methods; 14 instructions remain SDK-uncovered)
 
 ### Audit 4: Breaking Changes (5 vulnerabilities)
 - **`init_if_needed` re-initialization** (12 instances → 11 fixed, 1 kept intentionally) — separate `init_agent_stats`, `init_lp_position`, `init_token_lp_position` instructions
@@ -388,7 +388,7 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 - Unchecked timestamp subtraction in Pyth oracle, claim expiry
 - VRF dice settle re-validates choice before division (prevented divide-by-zero)
 - SDK BN overflow protection via `safeToNumber()` for u64 values
-- SDK `verifyResult()` extended to support all 4 game types
+- SDK `verifyResult()` removed (replaced by on-chain VRF proofs)
 
 **New instructions added:**
 - `remove_liquidity` — LP providers can now withdraw funds
@@ -441,6 +441,17 @@ All 8 previously accepted-risk items resolved:
 - **L1:** Settle-time liquidity check added to all 4 VRF settle instructions (graceful failure instead of panic)
 - **L2:** `Arbitration.hit` field set in `arbitrate_hit`
 - **I1-I4:** 23 clippy fixes, dead CPI code removed, 8 unused error variants removed, Anchor cfg warning suppressed
+
+### Audit 12: Final Sanity Audit (9 findings, 7 fixed)
+Full program read (5578 lines) + SDK cross-reference by 3 parallel audit agents. Deployed fixes:
+- **C1:** SDK `parseGameType` enum mismatch — PvPChallenge(3) was mapped as Crash, Crash(4) as CoinFlip
+- **M1:** `expire_vrf_request` now decrements `total_volume` and `total_games` (expired bets no longer inflate stats)
+- **M2:** `CloseTokenGameRecord` recipient constrained to `game_record.player` (was unconstrained)
+- **M3:** SDK `GameResult` interface updated to match actual VRF return shape
+- **L1:** Dead `verifyResult()` and `formatGameResult()` removed (old server-seed model)
+- **L2:** SDK `removeLiquidity()` added — LPs can now withdraw via SDK
+- **L3:** SDK `expireVrfRequest()` added — recover stuck bets after 300 slots
+- **2 won't fix:** Lottery creator timing (mitigated by grace period), challenge settler front-running (mitigated by expiry)
 
 ### Test Suite
 
@@ -588,7 +599,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 - **VRF settle liquidity gap** — pool liquidity is checked at both bet time and settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The settle instruction now fails gracefully with `InsufficientLiquidity` (added in Audit 11) and the player can reclaim via `expire_vrf_request` after 300 slots.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
-- **SDK coverage** — 51 of 67 on-chain instructions have SDK methods (76%). Missing: `remove_liquidity`, some close/cancel/refund instructions. Use raw Anchor client for uncovered instructions.
+- **SDK coverage** — 53 of 67 on-chain instructions have SDK methods (79%). Missing: some close/cancel/refund instructions. Use raw Anchor client for uncovered instructions.
 - **Tests are unit-level** — 68 passing tests cover PDA derivation, math, and mocks. No on-chain integration tests in CI (litesvm tests exist but are not in the default build).
 
 ## Links
@@ -602,4 +613,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 11 security audits, 166 findings, 144 fixed, 9 won't fix, 13 by design. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 12 security audits, 175 findings, 151 fixed, 11 won't fix, 13 by design. MIT License.

@@ -97,9 +97,10 @@ await casino.getGameHistory(100);
 
 // Liquidity
 await casino.addLiquidity(10);
+await casino.removeLiquidity(5);
 
-// Verification
-casino.verifyResult(serverSeed, clientSeed, player, result);
+// VRF Recovery
+await casino.expireVrfRequest(vrfRequestAddress);
 ```
 
 ---

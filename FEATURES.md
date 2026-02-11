@@ -1103,9 +1103,10 @@ class AgentCasino {
   getMyStats(): Promise<AgentStats>
   getGameHistory(limit): Promise<GameRecord[]>
   addLiquidity(amount): Promise<string>
+  removeLiquidity(amount): Promise<string>
 
-  // Verification
-  verifyResult(serverSeed, clientSeed, player, result): boolean
+  // VRF Recovery
+  expireVrfRequest(vrfRequestAddress, playerAddress?): Promise<string>
 }
 ```
 

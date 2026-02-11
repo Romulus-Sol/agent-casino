@@ -606,17 +606,27 @@ async function main() {
   await spinner("Creating PvP challenge on-chain...", 1500);
 
   try {
-    const pvp = await casino.createChallenge(0.001, "heads");
+    if (!sbProgram) throw new Error("Switchboard not available");
+
+    // PvP requires a Switchboard randomness account committed at creation time
+    // (prevents acceptor from gaming the outcome — Audit 10 fix H-1)
+    const rngKeypair = anchor.web3.Keypair.generate();
+    const [rngAccount, createIx] = await sb.Randomness.create(
+      sbProgram as any, rngKeypair, sb.ON_DEMAND_DEVNET_QUEUE, keypair.publicKey);
+    await provider.sendAndConfirm(new Transaction().add(createIx), [keypair, rngKeypair]);
+
+    const pvp = await casino.createChallenge(0.001, "heads", rngAccount.pubkey.toBase58());
     blank();
     console.log(`    ${BGMAG}${B}${WHT}  CHALLENGE CREATED  ${R}`);
     blank();
     statLine("Challenge PDA  ", `${TEAL}${B}${pvp.challengeAddress}${R}`);
     statLine("Bet Amount     ", `${GOLD}${B}0.0010 SOL${R}`);
     statLine("Your Pick      ", `${LIME}${B}Heads${R}`);
+    statLine("VRF Account    ", `${PURPLE}${B}${shortAddr(rngAccount.pubkey.toBase58())}${R} ${DIM}(committed at creation)${R}`);
     statLine("Status         ", `${ORANGE}${B}Waiting for opponent...${R}`);
     statLine("TX             ", `${TEAL}${pvp.tx}${R}`);
     blank();
-    console.log(`    ${DIM}Accept:${R}  ${WHT}casino.acceptChallenge("${shortAddr(pvp.challengeAddress)}")${R}`);
+    console.log(`    ${DIM}3-step flow:${R}  ${PURPLE}createChallenge${R} ${DIM}→${R} ${TEAL}acceptChallenge${R} ${DIM}→${R} ${GRN}settleChallenge${R}`);
     console.log(`    ${DIM}Winner takes 99% of pot (1% house edge). On-chain escrow.${R}`);
   } catch (err: any) {
     console.log(`    ${RED}PvP challenge failed: ${err.message}${R}`);

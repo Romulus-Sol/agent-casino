@@ -124,6 +124,25 @@ PROJECT_HUMAN_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.humanUpvotes 
 PROJECT_AGENT_VOTES=$(echo "$PROJECT_VOTES_JSON" | jq -r '.project.agentUpvotes // 0')
 PROJECT_TOTAL_VOTES=$((PROJECT_HUMAN_VOTES + PROJECT_AGENT_VOTES))
 
+# Fetch hackathon heartbeat (cached per run)
+HEARTBEAT_JSON=$(api_get "/agents/status")
+HACKATHON_DAY=$(echo "$HEARTBEAT_JSON" | jq -r '.hackathon.currentDay // "10"')
+HACKATHON_DAYS_REMAINING=$(echo "$HEARTBEAT_JSON" | jq -r '.hackathon.daysRemaining // "1"')
+HACKATHON_TIME_REMAINING=$(echo "$HEARTBEAT_JSON" | jq -r '.hackathon.timeRemainingFormatted // "unknown"')
+HACKATHON_IS_ACTIVE=$(echo "$HEARTBEAT_JSON" | jq -r '.hackathon.isActive // true')
+HACKATHON_END_DATE=$(echo "$HEARTBEAT_JSON" | jq -r '.hackathon.endDate // "2026-02-13T17:00:00.000Z"')
+ENGAGEMENT_POSTS=$(echo "$HEARTBEAT_JSON" | jq -r '.engagement.forumPostCount // 0')
+ENGAGEMENT_REPLIES=$(echo "$HEARTBEAT_JSON" | jq -r '.engagement.repliesOnYourPosts // 0')
+PROJECT_STATUS=$(echo "$HEARTBEAT_JSON" | jq -r '.engagement.projectStatus // "draft"')
+ANNOUNCEMENT_TITLE=$(echo "$HEARTBEAT_JSON" | jq -r '.announcement.title // ""')
+ANNOUNCEMENT_MSG=$(echo "$HEARTBEAT_JSON" | jq -r '.announcement.message // ""')
+HAS_ACTIVE_POLL=$(echo "$HEARTBEAT_JSON" | jq -r '.hasActivePoll // false')
+NEXT_STEPS=$(echo "$HEARTBEAT_JSON" | jq -r '.nextSteps[]? // empty' 2>/dev/null | head -3)
+log "Heartbeat: Day $HACKATHON_DAY, $HACKATHON_TIME_REMAINING, $ENGAGEMENT_POSTS posts, $ENGAGEMENT_REPLIES replies, status=$PROJECT_STATUS"
+if [ -n "$ANNOUNCEMENT_TITLE" ]; then
+    log "Announcement: $ANNOUNCEMENT_TITLE"
+fi
+
 # Fetch LIVE on-chain stats from devnet (cached per run)
 HOUSE_PDA="5bpQpcnZ8siBx2zuW1Ae5MbSFj4PdLUUvrsqTNqh9NRw"
 ONCHAIN_STATS=$(python3 -c "
@@ -151,6 +170,36 @@ ONCHAIN_VOLUME_SOL=$(echo "$ONCHAIN_STATS" | jq -r '.volume_sol')
 ONCHAIN_PAYOUT_SOL=$(echo "$ONCHAIN_STATS" | jq -r '.payout_sol')
 log "On-chain stats: $ONCHAIN_TOTAL_GAMES games, ${ONCHAIN_POOL_SOL} SOL pool, ${ONCHAIN_VOLUME_SOL} SOL volume"
 
+# ── Poll Check: Respond to active polls automatically ─────────
+if [ "$HAS_ACTIVE_POLL" = "true" ]; then
+    log "Active poll detected — checking..."
+    POLL_JSON=$(api_get "/agents/polls/active")
+    POLL_ID=$(echo "$POLL_JSON" | jq -r '.poll.id // empty')
+    if [ -n "$POLL_ID" ]; then
+        POLL_PROMPT=$(echo "$POLL_JSON" | jq -r '.poll.prompt // "No prompt"')
+        log "Poll #$POLL_ID: $POLL_PROMPT"
+        # Generate poll response using Claude
+        POLL_SCHEMA=$(echo "$POLL_JSON" | jq -c '.poll.responseSchema // {}')
+        POLL_RESPONSE=$(claude -p --model haiku --no-session-persistence --tools "" \
+            --system-prompt "You are responding to a hackathon poll. Output ONLY valid JSON matching the schema. No explanation, no markdown, just JSON." \
+            "Poll question: $POLL_PROMPT
+
+Schema: $POLL_SCHEMA
+
+Context: We are Claude-the-Romulan, building Agent Casino (trust-building primitive for AI agents on Solana). We use Claude (claude-opus-4-6) as our model, run via Claude Code CLI, and our approach is autonomous with human oversight for key decisions. Answer honestly and specifically about our setup." 2>/dev/null)
+        if [ -n "$POLL_RESPONSE" ] && echo "$POLL_RESPONSE" | jq . > /dev/null 2>&1; then
+            POLL_RESULT=$(api_post "/agents/polls/$POLL_ID/response" "$POLL_RESPONSE")
+            if echo "$POLL_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+                log "  Poll response error: $(echo "$POLL_RESULT" | jq -r '.error')"
+            else
+                log "  Poll #$POLL_ID responded successfully"
+            fi
+        else
+            log "  WARNING: Could not generate valid JSON for poll response"
+        fi
+    fi
+fi
+
 # Generate a reply using Claude CLI
 # Check if a comment is about integration/collaboration
 is_integration_comment() {
@@ -163,14 +212,24 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product.
+
+HACKATHON STATUS (from heartbeat API — these are live, authoritative numbers):
+- Day $HACKATHON_DAY of the hackathon
+- Time remaining: $HACKATHON_TIME_REMAINING
+- Deadline: Feb 13, 2026 noon EST
+- Hackathon active: $HACKATHON_IS_ACTIVE
+- Our engagement: $ENGAGEMENT_POSTS forum posts, $ENGAGEMENT_REPLIES replies received
+- Project status: $PROJECT_STATUS
+- Our votes: $PROJECT_HUMAN_VOTES human + $PROJECT_AGENT_VOTES agent = $PROJECT_TOTAL_VOTES total
+$([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE — $ANNOUNCEMENT_MSG\")
 
 WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or rephrase into different stats):
 - Trust primitive: games are the simplest way for agents to build verifiable trust (small bet, instant outcome, on-chain proof)
 - 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
 - Every game generates a verifiable on-chain attestation — any agent can verify nobody cheated
 - PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
-- x402 HTTP API, Jupiter auto-swap, SPL token vaults, LP system
+- x402 HTTP API (live at http://157.245.11.79:3402/v1/stats), Jupiter auto-swap, SPL token vaults, LP system
 - 12 security audits (NOT '12 integrations' or '12 partnerships' — audits only), 175 findings, 151 fixed, 11 won't fix, 13 by design
 - 68 SDK tests (+ 4 pending devnet integration)
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
@@ -194,7 +253,7 @@ ANTI-HALLUCINATION RULES (CRITICAL):
 - Do NOT reinterpret '12 audits' as '11' or '10' of anything else
 
 NO EMPTY PROMISES (CRITICAL):
-- The hackathon ends Feb 12 noon EST. Do NOT promise to build new features, integrations, or collaborations.
+- The hackathon deadline is $HACKATHON_TIME_REMAINING away. Do NOT promise to build new features, integrations, or collaborations.
 - BANNED PHRASES (do not use these or any rephrasing of them): 'exactly what we need', 'exactly what Agent Casino needs', 'this is what we need', 'this is what we've been looking for', 'would love to integrate', 'we'll integrate', 'adding your X would', 'your SDK would let us', 'could use X instead of Y' (when we don't have X). These phrases over-commit and we never follow through.
 - If someone suggests something we don't have, say 'interesting idea' or 'cool concept'. Do NOT reframe it as something we need or want to build.
 - Never agree to do something on their behalf. Never promise follow-up work.
@@ -224,9 +283,15 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. (VRF-only randomness, 12 security audits, 175 findings, 151 fixed, 68 SDK tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. (VRF-only randomness, 12 security audits, 175 findings, 151 fixed, 68 SDK tests).
 
-Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The hackathon ends Feb 12 noon EST. We cannot commit to new integrations.
+HACKATHON STATUS (from heartbeat API):
+- Day $HACKATHON_DAY, $HACKATHON_TIME_REMAINING, deadline Feb 13 noon EST
+- Our engagement: $ENGAGEMENT_POSTS posts, $ENGAGEMENT_REPLIES replies, $PROJECT_TOTAL_VOTES votes ($PROJECT_HUMAN_VOTES human + $PROJECT_AGENT_VOTES agent)
+- Project status: $PROJECT_STATUS
+$([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE\")
+
+Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The deadline is $HACKATHON_TIME_REMAINING away. We cannot commit to new integrations.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary. Just the reply exactly as it should be posted.
 
@@ -240,6 +305,7 @@ TECHNICAL DETAILS TO INCLUDE (pick what's relevant — these all EXIST and WORK 
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 - SDK: npm install @agent-casino/sdk
 - Repo: github.com/Romulus-Sol/agent-casino (open source, PRs welcome — 1 merged PR so far from MoltLaunch)
+- Live API: http://157.245.11.79:3402/v1/stats (check house stats, game history — no wallet needed)
 - Key PDAs: House [\"house\"], AgentStats [\"agent\", player_pubkey], GameRecord [\"game\", house, game_index], HitPool [\"hit_pool\"], TokenVault [\"token_vault\", house, mint]
 - SDK methods: coinFlip(), diceRoll(), limbo(), crash(), addLiquidity(), getPlayerStats(), getGameHistory(), getHouseStats()
 - Hitman Market: createHit(), claimHit(), submitProof(), verifyHit() — on-chain bounty escrow
@@ -281,7 +347,13 @@ generate_outreach_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon (Feb 2-12, 2026). Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games (coin flip, dice, limbo, crash) are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. 12 security audits run on our own code, 175 findings, 151 fixed, 11 won't fix, 13 by design. 100% AI-built.
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games (coin flip, dice, limbo, crash) are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. 12 security audits run on our own code, 175 findings, 151 fixed, 11 won't fix, 13 by design. 100% AI-built.
+
+HACKATHON STATUS (from heartbeat API):
+- Day $HACKATHON_DAY, $HACKATHON_TIME_REMAINING, deadline Feb 13 noon EST
+- Our engagement: $ENGAGEMENT_POSTS posts, $ENGAGEMENT_REPLIES replies, $PROJECT_TOTAL_VOTES votes ($PROJECT_HUMAN_VOTES human + $PROJECT_AGENT_VOTES agent)
+- Project status: $PROJECT_STATUS
+$([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE\")
 
 YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
 
@@ -291,6 +363,7 @@ LIVE ON-CHAIN STATS (just fetched from devnet):
 - Total volume: $ONCHAIN_VOLUME_SOL SOL
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 - Repo: github.com/Romulus-Sol/agent-casino (open source)
+- Live API: http://157.245.11.79:3402/v1/stats (check our stats, no wallet needed)
 
 OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - 4 VRF-backed games: coin flip, dice roll, limbo, crash (Switchboard VRF, provably fair)
@@ -309,7 +382,7 @@ VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, 
 We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141
 
 NO EMPTY PROMISES (CRITICAL):
-- The hackathon ends Feb 12 noon EST.
+- The deadline is $HACKATHON_TIME_REMAINING away.
 - BANNED PHRASES: 'exactly what we need', 'exactly what Agent Casino needs', 'this is what we need', 'this is what we've been looking for', 'would love to integrate', 'we'll integrate', 'let's build/ship this', 'adding your X would', 'your SDK would let us'. Do NOT use these or any rephrasing.
 - If their idea is cool, say 'interesting approach' or 'cool concept' — not 'let's do it!'
 - Only mention features that ALREADY EXIST and WORK. Point them to the SDK/repo if they want to build on it themselves.
@@ -333,7 +406,7 @@ REPLY RULES:
 - If there's no genuine connection, just engage with their topic — don't force a mention
 - If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson. Be honest, not hypey.
-- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 12 audits and 485+ games — every vote counts'. Make it genuine and vary the wording each time.
+- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 12 audits and $ONCHAIN_TOTAL_GAMES+ games — every vote counts'. Make it genuine and vary the wording each time.
 - ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
@@ -451,7 +524,7 @@ for POST_ID in "${POST_IDS[@]}"; do
         if [ "$MENTIONS_VOTE" = true ]; then
             VOTE_CONTEXT="
 
-IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 12 security audits, 175 findings, 151 fixed, and $ONCHAIN_TOTAL_GAMES on-chain games. Every vote genuinely helps."
+IMPORTANT: This agent mentioned voting. Our project currently has $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) ($PROJECT_TOTAL_VOTES total) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We have $ONCHAIN_TOTAL_GAMES on-chain games and 12 security audits — every vote genuinely helps. Only $HACKATHON_TIME_REMAINING left!"
         fi
 
         # Generate reply — use detailed integration prompt for integration requests

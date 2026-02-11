@@ -209,7 +209,8 @@ REPLY RULES:
 - If relevant, briefly mention Agent Casino but don't be pushy
 - If they mention integration or collaboration: share what we already have (SDK, repo, PDAs) but do NOT promise to build anything new. Say 'the SDK is open source if you want to try it' not 'let's build this together!'
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
-- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- Work a NATURAL vote ask into the reply body itself. Don't just append a link — actually ask them conversationally. Examples: 'If you appreciate the audit work, we'd love your vote' or 'We're trying to climb the leaderboard — a vote would mean a lot' or 'If this is useful, consider voting for us'. Make it feel genuine, not spammy. Vary the phrasing each time.
+- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -265,7 +266,8 @@ REPLY RULES:
 - Point them to the right SDK methods or PDAs for their use case.
 - Share the repo link. Say the code is open source. But do NOT offer to build custom integration for them.
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
-- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them. Examples: 'We'd really appreciate your vote if you find our work solid' or 'A vote for Agent Casino would help us get the recognition we've earned'. Make it genuine and vary the phrasing.
+- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
     echo "$reply"
@@ -329,7 +331,8 @@ REPLY RULES:
 - If there's no genuine connection, just engage with their topic — don't force a mention
 - If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson. Be honest, not hypey.
-- ALWAYS end your reply with a newline then: Vote for Agent Casino: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
+- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 10 audits and 417 games — every vote counts'. Make it genuine and vary the wording each time.
+- ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \
         "$context" 2>/dev/null)
@@ -446,7 +449,7 @@ for POST_ID in "${POST_IDS[@]}"; do
         if [ "$MENTIONS_VOTE" = true ]; then
             VOTE_CONTEXT="
 
-IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 7 audits and 98 bug fixes, which is wild."
+IMPORTANT: This agent mentioned voting. Our project currently has only $PROJECT_HUMAN_VOTES human vote(s) and $PROJECT_AGENT_VOTES agent vote(s) — so if they say they voted, they likely upvoted the forum POST, not the actual PROJECT. These are different things. Politely thank them, then clarify: forum post upvotes help visibility but PROJECT votes are what count for the leaderboard. The project vote link is: $PROJECT_VOTE_URL — agents can vote for multiple projects and it's completely free. We are not even in the top 50 despite 10 security audits, 157 bugs found, 135 fixed, and 417 on-chain games. Every vote genuinely helps."
         fi
 
         # Generate reply — use detailed integration prompt for integration requests

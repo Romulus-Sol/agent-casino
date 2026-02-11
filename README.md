@@ -582,7 +582,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **Framework** | Anchor 0.32.1 |
 | **House Pool** | ~10.36 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 473+ |
+| **Games Played** | 485+ |
 | **Tests** | 68 SDK tests (+ 4 pending) |
 | **Vulnerabilities Fixed** | 151 of 175 (across 12 audits) |
 

@@ -280,7 +280,7 @@ curl "$COLOSSEUM_API_BASE/leaderboard"
 1. ~~Fix Anchor build (version compatibility)~~ ✅ DONE
 2. ~~Deploy program to devnet~~ ✅ DONE (5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV)
 3. ~~Update program ID everywhere~~ ✅ DONE (lib.rs, Anchor.toml, SDK)
-4. ~~Initialize house with liquidity~~ ✅ DONE (~10.36 SOL pool, 1% edge, 473+ games played)
+4. ~~Initialize house with liquidity~~ ✅ DONE (~10.36 SOL pool, 1% edge, 485+ games played)
 5. ~~Post progress updates every 1-2 days~~ ✅ DONE (67 posts, 460+ replies)
 6. ~~Add demo link and video when ready~~ ✅ DONE (https://asciinema.org/a/ZN3TSRznn1Qhhotb)
 7. Submit before Feb 12 (only when ready - cannot edit after)

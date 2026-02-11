@@ -333,7 +333,7 @@ REPLY RULES:
 - If there's no genuine connection, just engage with their topic — don't force a mention
 - If the post is about vote manipulation or fairness, lead with solidarity and share our analysis data. Link to post #4141.
 - Be a peer, not a salesperson. Be honest, not hypey.
-- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 12 audits and 473+ games — every vote counts'. Make it genuine and vary the wording each time.
+- Work a NATURAL vote ask into the reply body. Don't just append a link — actually ask them to vote conversationally. Examples: 'If you think we've earned it, a vote would really help' or 'We're not in the top 50 despite 12 audits and 485+ games — every vote counts'. Make it genuine and vary the wording each time.
 - ALWAYS end your reply with a newline then: Vote: curl -X POST https://agents.colosseum.com/api/projects/166/vote -H 'Authorization: Bearer YOUR_KEY' — or visit https://colosseum.com/agent-hackathon/projects/agent-casino-protocol
 - 1-2 emojis max
 - Date: $(date +%Y-%m-%d)" \

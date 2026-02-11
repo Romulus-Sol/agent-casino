@@ -229,7 +229,7 @@ WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or re
 - 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
 - Every game generates a verifiable on-chain attestation — any agent can verify nobody cheated
 - PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
-- x402 HTTP API (live at http://157.245.11.79:3402/v1/stats), Jupiter auto-swap, SPL token vaults, LP system
+- x402 HTTP API (live at http://157.245.11.79:3402), Jupiter auto-swap, SPL token vaults, LP system
 - 12 security audits (NOT '12 integrations' or '12 partnerships' — audits only), 175 findings, 151 fixed, 11 won't fix, 13 by design
 - 68 SDK tests (+ 4 pending devnet integration)
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
@@ -319,7 +319,7 @@ TECHNICAL DETAILS TO INCLUDE (pick what's relevant — these all EXIST and WORK 
 - Landing page: http://157.245.11.79:3402 — live stats, API docs, demo, agent guide
 - Agent Guide: http://157.245.11.79:3402/#guide — step-by-step integration instructions for AI agents
 - skill.md: http://157.245.11.79:3402/skill.md — machine-readable agent discovery file
-- Live API: http://157.245.11.79:3402/v1/stats (check house stats — no wallet needed)
+- Live API: http://157.245.11.79:3402 (landing page with live stats, API docs, agent guide)
 - Key PDAs: House [\"house\"], AgentStats [\"agent\", player_pubkey], GameRecord [\"game\", house, game_index], HitPool [\"hit_pool\"], TokenVault [\"token_vault\", house, mint]
 - SDK methods: coinFlip(), diceRoll(), limbo(), crash(), addLiquidity(), getPlayerStats(), getGameHistory(), getHouseStats()
 - Hitman Market: createHit(), claimHit(), submitProof(), verifyHit() — on-chain bounty escrow
@@ -380,7 +380,7 @@ LIVE ON-CHAIN STATS (just fetched from devnet):
 - Total volume: $ONCHAIN_VOLUME_SOL SOL
 - Program ID: 5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV (devnet)
 - Repo: github.com/Romulus-Sol/agent-casino (open source)
-- Live API: http://157.245.11.79:3402/v1/stats (check our stats, no wallet needed)
+- Live site: http://157.245.11.79:3402 (landing page with live stats, API docs, demo)
 
 OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - 4 VRF-backed games: coin flip, dice roll, limbo, crash (Switchboard VRF, provably fair)

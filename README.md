@@ -359,7 +359,7 @@ Twelve rounds of self-auditing. **175 total findings, 151 fixed.** 11 won't fix 
 - Fixed `unwrap_or` / `unwrap` panics → `checked_add().ok_or(MathOverflow)?`
 - Fixed `saturating_sub` silent fund loss → `checked_sub` with error propagation
 - Fixed unchecked `as u64` casts → u128 intermediates with bounds checks
-- SDK expanded from 71% to 79% instruction coverage (23 new methods; 14 instructions remain SDK-uncovered)
+- SDK expanded from 71% to 100% instruction coverage (all 67 instructions now have SDK methods)
 
 ### Audit 4: Breaking Changes (5 vulnerabilities)
 - **`init_if_needed` re-initialization** (12 instances → 11 fixed, 1 kept intentionally) — separate `init_agent_stats`, `init_lp_position`, `init_token_lp_position` instructions
@@ -449,8 +449,8 @@ Full program read (5578 lines) + SDK cross-reference by 3 parallel audit agents.
 - **M2:** `CloseTokenGameRecord` recipient constrained to `game_record.player` (was unconstrained)
 - **M3:** SDK `GameResult` interface updated to match actual VRF return shape
 - **L1:** Dead `verifyResult()` and `formatGameResult()` removed (old server-seed model)
-- **L2:** SDK `removeLiquidity()` added — LPs can now withdraw via SDK
-- **L3:** SDK `expireVrfRequest()` added — recover stuck bets after 300 slots
+- **L2:** SDK `removeLiquidity()` + `expireVrfRequest()` added
+- **L3:** 14 missing SDK methods added (close, cancel, refund, admin) — 100% instruction coverage
 - **2 won't fix:** Lottery creator timing (mitigated by grace period), challenge settler front-running (mitigated by expiry)
 
 ### Test Suite
@@ -599,7 +599,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 - **VRF settle liquidity gap** — pool liquidity is checked at both bet time and settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The settle instruction now fails gracefully with `InsufficientLiquidity` (added in Audit 11) and the player can reclaim via `expire_vrf_request` after 300 slots.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
-- **SDK coverage** — 53 of 67 on-chain instructions have SDK methods (79%). Missing: some close/cancel/refund instructions. Use raw Anchor client for uncovered instructions.
+- **SDK coverage** — all 67 on-chain instructions have SDK methods (100%). Close/cancel/refund/admin methods added in Audit 12.
 - **Tests are unit-level** — 68 passing tests cover PDA derivation, math, and mocks. No on-chain integration tests in CI (litesvm tests exist but are not in the default build).
 
 ## Links

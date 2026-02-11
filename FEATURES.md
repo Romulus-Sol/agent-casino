@@ -8,11 +8,13 @@ Complete documentation for all Agent Casino features. For a quick overview, see 
 
 Classic casino games with **Switchboard VRF** (Verifiable Random Function) — the only randomness path. Non-VRF instructions have been removed entirely. The SDK handles the 2-step request→settle flow automatically with retry.
 
+> **Note:** All game methods require a `randomnessAccount` parameter (Switchboard VRF account). The examples below omit it for brevity. See `examples/quick-play.ts` for the full flow including randomness account creation.
+
 ### Coin Flip
 50/50 odds, ~2x payout (minus 1% house edge)
 
 ```typescript
-const result = await casino.coinFlip(0.1, 'heads');
+const result = await casino.coinFlip(0.1, 'heads', randomnessAccount);
 console.log(result.won ? `Won ${result.payout} SOL!` : 'Lost');
 ```
 
@@ -1107,6 +1109,26 @@ class AgentCasino {
 
   // VRF Recovery
   expireVrfRequest(vrfRequestAddress, playerAddress?): Promise<string>
+
+  // Close / Rent Recovery
+  closeChallenge(challengeAddress): Promise<string>
+  closePricePrediction(predictionAddress, creatorAddress): Promise<string>
+  closePredictionBet(betAddress): Promise<string>
+  closeTokenGameRecord(mintAddress, gameIndex, playerAddress): Promise<string>
+  closeMemory(memoryAddress): Promise<string>
+  closeMemoryPull(pullAddress): Promise<string>
+  closeHit(hitAddress): Promise<string>
+  closeLottery(lotteryAddress): Promise<string>
+  closeLotteryTicket(lotteryAddress, ticketAddress): Promise<string>
+
+  // Cancel / Refund
+  cancelPredictionMarket(marketAddress): Promise<string>
+  claimPredictionRefund(marketAddress): Promise<string>
+  expireClaim(hitAddress, posterAddress): Promise<string>
+
+  // Admin (one-time setup)
+  initializeHouse(houseEdgeBps, minBet, maxBetPercent): Promise<string>
+  initializeHitPool(houseEdgeBps): Promise<string>
 }
 ```
 
@@ -1163,7 +1185,7 @@ class HitmanMarket {
 - [x] Security audit #10: 32 findings, 10 fixed (VRF PvP migration, prediction market bounds, pool accounting, close recipients)
 - [x] Security audit #11: 9 findings, 9 fixed (PvP VRF acceptor gaming, LP withdrawal, SDK arg mismatches, settle-time liquidity, clippy clean)
 - [x] Switchboard VRF (Verifiable Random Function) for all games + PvP — non-VRF instructions removed
-- [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
+- [x] SDK covers all 67 on-chain instructions (games, close, cancel, refund, admin, LP)
 - [x] Security audit #12: 9 findings, 7 fixed (SDK enum mismatch, VRF expiry stats, GameResult type, dead code removal, SDK gap fixes)
 - [x] Comprehensive test suite (68 SDK tests + 4 pending, 175 findings across 12 audits, 151 fixed, 11 won't fix, 13 by design)
 - [x] Lottery pool with VRF-drawn winners (on-chain)

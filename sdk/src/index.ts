@@ -466,6 +466,286 @@ export class AgentCasino {
     return await this.provider.sendAndConfirm(tx);
   }
 
+  // === Close / Cancel / Admin Methods ===
+
+  /**
+   * Close a settled/cancelled challenge to recover rent. Challenger only.
+   */
+  async closeChallenge(challengeAddress: string): Promise<string> {
+    const challengePubkey = new PublicKey(challengeAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: challengePubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([0x1d, 0x9c, 0x6d, 0x11, 0x29, 0x63, 0x47, 0xec]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a settled/cancelled price prediction to recover rent. House authority only.
+   */
+  async closePricePrediction(predictionAddress: string, creatorAddress: string): Promise<string> {
+    const predictionPubkey = new PublicKey(predictionAddress);
+    const creator = new PublicKey(creatorAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: predictionPubkey, isSigner: false, isWritable: true },
+        { pubkey: creator, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([0x05, 0xa2, 0x74, 0x73, 0xad, 0xd7, 0x75, 0x62]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a claimed prediction bet to recover rent. Bettor only.
+   */
+  async closePredictionBet(betAddress: string): Promise<string> {
+    const betPubkey = new PublicKey(betAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: betPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([0x61, 0xc6, 0x8e, 0xde, 0x74, 0x6e, 0x46, 0x0d]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a token game record to recover rent. Authority only.
+   */
+  async closeTokenGameRecord(mintAddress: string, gameIndex: number, playerAddress: string): Promise<string> {
+    const mint = new PublicKey(mintAddress);
+    const player = new PublicKey(playerAddress);
+    const [tokenVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_vault'), mint.toBuffer()], PROGRAM_ID
+    );
+    const [gameRecordPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_game'), tokenVaultPda.toBuffer(), new BN(gameIndex).toArrayLike(Buffer, 'le', 8)], PROGRAM_ID
+    );
+    const data = Buffer.alloc(16);
+    Buffer.from([0x4c, 0x47, 0x68, 0xb7, 0x86, 0xc6, 0xf0, 0x3d]).copy(data);
+    new BN(gameIndex).toArrayLike(Buffer, 'le', 8).copy(data, 8);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: tokenVaultPda, isSigner: false, isWritable: false },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: gameRecordPda, isSigner: false, isWritable: true },
+        { pubkey: player, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close an inactive memory to recover rent. Depositor only.
+   */
+  async closeMemory(memoryAddress: string): Promise<string> {
+    const memoryPubkey = new PublicKey(memoryAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.memoryPoolPda, isSigner: false, isWritable: false },
+        { pubkey: memoryPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([0x34, 0x8b, 0xf4, 0xd3, 0x18, 0x44, 0x08, 0xaa]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a rated memory pull to recover rent. Puller only.
+   */
+  async closeMemoryPull(pullAddress: string): Promise<string> {
+    const pullPubkey = new PublicKey(pullAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: pullPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([0x6c, 0x23, 0x0f, 0x3e, 0x70, 0xf1, 0x01, 0x0c]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a completed/cancelled hit to recover rent. Poster only.
+   */
+  async closeHit(hitAddress: string): Promise<string> {
+    const hitPubkey = new PublicKey(hitAddress);
+    const [hitPoolPda] = PublicKey.findProgramAddressSync([Buffer.from('hit_pool')], PROGRAM_ID);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: hitPoolPda, isSigner: false, isWritable: false },
+        { pubkey: hitPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([0x0c, 0xb2, 0xe4, 0x5e, 0x00, 0xb0, 0x80, 0x57]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a claimed/cancelled lottery to recover rent. Creator only.
+   */
+  async closeLottery(lotteryAddress: string): Promise<string> {
+    const lotteryPubkey = new PublicKey(lotteryAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: lotteryPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([0xfd, 0x61, 0xd8, 0xbb, 0xfb, 0xbd, 0x71, 0x16]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Close a lottery ticket from a claimed/cancelled lottery. Ticket buyer only.
+   */
+  async closeLotteryTicket(lotteryAddress: string, ticketAddress: string): Promise<string> {
+    const lotteryPubkey = new PublicKey(lotteryAddress);
+    const ticketPubkey = new PublicKey(ticketAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: false },
+        { pubkey: lotteryPubkey, isSigner: false, isWritable: false },
+        { pubkey: ticketPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([0x2f, 0x05, 0x6f, 0xba, 0xc6, 0xaa, 0xf1, 0x89]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Cancel a prediction market. Authority only. Allows refunds.
+   */
+  async cancelPredictionMarket(marketAddress: string): Promise<string> {
+    const marketPubkey = new PublicKey(marketAddress);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: marketPubkey, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([0xef, 0x80, 0x62, 0xf6, 0x36, 0x2d, 0x73, 0xa5]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Claim a refund from a cancelled prediction market. Bettor only.
+   */
+  async claimPredictionRefund(marketAddress: string): Promise<string> {
+    const marketPubkey = new PublicKey(marketAddress);
+    const [betPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('pred_bet'), marketPubkey.toBuffer(), this.wallet.publicKey.toBuffer()], PROGRAM_ID
+    );
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: marketPubkey, isSigner: false, isWritable: true },
+        { pubkey: betPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([0x4f, 0x13, 0x2a, 0x3e, 0xc7, 0x2a, 0x3f, 0xd7]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Expire a stale hitman claim (after 24hr timeout). Anyone can call.
+   */
+  async expireClaim(hitAddress: string, posterAddress: string): Promise<string> {
+    const hitPubkey = new PublicKey(hitAddress);
+    const poster = new PublicKey(posterAddress);
+    const [hitPoolPda] = PublicKey.findProgramAddressSync([Buffer.from('hit_pool')], PROGRAM_ID);
+    const [hitVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('hit_vault'), hitPoolPda.toBuffer()], PROGRAM_ID
+    );
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: hitPoolPda, isSigner: false, isWritable: false },
+        { pubkey: hitPubkey, isSigner: false, isWritable: true },
+        { pubkey: hitVaultPda, isSigner: false, isWritable: true },
+        { pubkey: poster, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([0xb0, 0x4e, 0xf1, 0x1d, 0x9f, 0x51, 0x1a, 0x06]),
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Initialize the house. Admin only, called once.
+   */
+  async initializeHouse(houseEdgeBps: number, minBet: number, maxBetPercent: number): Promise<string> {
+    const minBetLamports = Math.floor(minBet * LAMPORTS_PER_SOL);
+    const data = Buffer.alloc(8 + 2 + 8 + 1);
+    Buffer.from([0xb4, 0x2e, 0x56, 0x7d, 0x87, 0x6b, 0xd6, 0x1c]).copy(data);
+    data.writeUInt16LE(houseEdgeBps, 8);
+    new BN(minBetLamports).toArrayLike(Buffer, 'le', 8).copy(data, 10);
+    data.writeUInt8(maxBetPercent, 18);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
+  /**
+   * Initialize the hitman pool. Admin only, called once.
+   */
+  async initializeHitPool(houseEdgeBps: number): Promise<string> {
+    const [hitPoolPda] = PublicKey.findProgramAddressSync([Buffer.from('hit_pool')], PROGRAM_ID);
+    const [hitVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('hit_vault'), hitPoolPda.toBuffer()], PROGRAM_ID
+    );
+    const data = Buffer.alloc(8 + 2);
+    Buffer.from([0x75, 0xe7, 0x28, 0x87, 0x3e, 0x7a, 0x6d, 0xdd]).copy(data);
+    data.writeUInt16LE(houseEdgeBps, 8);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: hitPoolPda, isSigner: false, isWritable: true },
+        { pubkey: hitVaultPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    return await this.provider.sendAndConfirm(new Transaction().add(ix));
+  }
+
   // === Game Methods (VRF-backed) ===
 
   /**

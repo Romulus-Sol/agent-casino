@@ -5115,8 +5115,8 @@ pub struct CloseTokenGameRecord<'info> {
     )]
     pub game_record: Account<'info, TokenGameRecord>,
 
-    /// CHECK: Rent recipient
-    #[account(mut)]
+    /// CHECK: Rent recipient — must be the original player
+    #[account(mut, constraint = recipient.key() == game_record.player @ CasinoError::NotAuthority)]
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == token_vault.authority @ CasinoError::NotAuthority)]

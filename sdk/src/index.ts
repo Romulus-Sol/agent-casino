@@ -80,15 +80,13 @@ export interface BettingContext {
 }
 
 export interface GameResult {
-  txSignature: string;
+  signature: string;
   won: boolean;
   payout: number; // in SOL
   result: number;
   choice: number;
-  serverSeed: string;
-  clientSeed: string;
-  verificationHash: string;
-  slot: number;
+  gameType: string;
+  amount: number; // bet amount in SOL
 }
 
 export interface HouseStats {
@@ -150,15 +148,14 @@ export interface TokenVaultStats {
 }
 
 export interface TokenGameResult {
-  txSignature: string;
+  signature: string;
   won: boolean;
   payout: number; // in token units
   result: number;
   choice: number;
   mint: string;
-  serverSeed: string;
-  clientSeed: string;
-  slot: number;
+  gameType: string;
+  amount: number;
 }
 
 export interface SwapAndPlayResult extends GameResult {
@@ -903,6 +900,42 @@ export class AgentCasino {
     return await this.provider.sendAndConfirm(tx);
   }
 
+  /**
+   * Remove liquidity from the house pool
+   * @param amountSol Amount to withdraw in SOL
+   * @returns Transaction signature
+   */
+  async removeLiquidity(amountSol: number): Promise<string> {
+    const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+
+    const [lpPositionPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('lp'),
+        this.housePda.toBuffer(),
+        this.wallet.publicKey.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: true },
+        { pubkey: lpPositionPda, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([
+        // remove_liquidity discriminator + amount
+        ...Buffer.from([0x50, 0x55, 0xd1, 0x48, 0x18, 0xce, 0xb1, 0x6c]),
+        ...new BN(amountLamports).toArrayLike(Buffer, 'le', 8),
+      ]),
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
   // === Risk Management (WARGAMES Integration) ===
 
   /**
@@ -1192,53 +1225,6 @@ export class AgentCasino {
       },
       this.connection,
     );
-  }
-
-  // === Verification Methods ===
-
-  /**
-   * Verify a game result is fair
-   * Agents can use this to audit results
-   */
-  /**
-   * Verify a game result is fair
-   * @param serverSeed Server seed hex string
-   * @param clientSeed Client seed hex string
-   * @param playerPubkey Player's public key
-   * @param expectedResult Expected result value
-   * @param gameType Game type: 'coinFlip' | 'diceRoll' | 'limbo' | 'crash'
-   */
-  verifyResult(
-    serverSeed: string,
-    clientSeed: string,
-    playerPubkey: string,
-    expectedResult: number,
-    gameType: 'coinFlip' | 'diceRoll' | 'limbo' | 'crash' = 'coinFlip'
-  ): boolean {
-    const combined = Buffer.concat([
-      Buffer.from(serverSeed, 'hex'),
-      Buffer.from(clientSeed, 'hex'),
-      new PublicKey(playerPubkey).toBuffer(),
-    ]);
-
-    const hash = createHash('sha256').update(combined).digest();
-
-    switch (gameType) {
-      case 'coinFlip':
-        return (hash[0] % 2) === expectedResult;
-      case 'diceRoll': {
-        const raw = hash.readUInt32LE(0);
-        return ((raw % 6) + 1) === expectedResult;
-      }
-      case 'limbo':
-      case 'crash':
-        // For limbo/crash, result is a multiplier - verify raw matches
-        // Full verification requires reimplementing calculate_limbo_result/calculate_crash_point
-        const raw = hash.readUInt32LE(0);
-        return raw === expectedResult;
-      default:
-        return (hash[0] % 2) === expectedResult;
-    }
   }
 
   // === SPL Token Methods ===
@@ -2662,6 +2648,36 @@ export class AgentCasino {
     };
   }
 
+  /**
+   * Expire a VRF request that hasn't been settled within 300 slots.
+   * Refunds the player's bet from the house pool.
+   * @param vrfRequestAddress Address of the VRF request PDA
+   * @param playerAddress Player who placed the bet (receives refund)
+   * @returns Transaction signature
+   */
+  async expireVrfRequest(vrfRequestAddress: string, playerAddress?: string): Promise<string> {
+    const vrfRequestPubkey = new PublicKey(vrfRequestAddress);
+    const player = playerAddress ? new PublicKey(playerAddress) : this.wallet.publicKey;
+
+    const ix = {
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: this.housePda, isSigner: false, isWritable: true },
+        { pubkey: vrfRequestPubkey, isSigner: false, isWritable: true },
+        { pubkey: player, isSigner: false, isWritable: true },
+        { pubkey: this.wallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([
+        // expire_vrf_request discriminator
+        0xc8, 0x65, 0xd6, 0x65, 0xbf, 0x86, 0x83, 0x3a,
+      ]),
+    };
+
+    const tx = new Transaction().add(ix);
+    return await this.provider.sendAndConfirm(tx);
+  }
+
   // === VRF Game Methods (Switchboard Randomness) ===
 
   /**
@@ -2895,27 +2911,6 @@ export class AgentCasino {
     return { tx, won: settled.payout.toNumber() > 0, payout: settled.payout.toNumber() / LAMPORTS_PER_SOL };
   }
 
-  private formatGameResult(
-    signature: string,
-    record: any,
-    clientSeed: Buffer
-  ): GameResult {
-    const won = record.payout.toNumber() > 0;
-    
-    return {
-      txSignature: signature,
-      won,
-      payout: record.payout.toNumber() / LAMPORTS_PER_SOL,
-      result: record.result,
-      choice: record.choice,
-      serverSeed: Buffer.from(record.serverSeed).toString('hex'),
-      clientSeed: clientSeed.toString('hex'),
-      verificationHash: createHash('sha256')
-        .update(Buffer.concat([record.serverSeed, clientSeed]))
-        .digest('hex'),
-      slot: record.slot.toNumber(),
-    };
-  }
 }
 
 // === Hitman Market Re-export ===

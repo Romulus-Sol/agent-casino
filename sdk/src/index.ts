@@ -2090,9 +2090,35 @@ export class AgentCasino {
   }
 
   /**
-   * Accept an open PvP challenge
+   * Accept an open PvP challenge (VRF-backed — requires settle_challenge after)
+   * @param challengeAddress The challenge PDA address
+   * @param randomnessAccount Switchboard randomness account address
+   * @returns Transaction signature. Call settleChallenge() after randomness is revealed.
    */
-  async acceptChallenge(challengeAddress: string): Promise<{ tx: string; won: boolean; result: number }> {
+  async acceptChallenge(challengeAddress: string, randomnessAccount: string): Promise<string> {
+    await this.loadProgram();
+    if (!randomnessAccount) {
+      throw new Error('randomnessAccount is required — create one via Switchboard SDK');
+    }
+    const challengePda = new PublicKey(challengeAddress);
+
+    return await this.program.methods
+      .acceptChallenge()
+      .accounts({
+        challenge: challengePda,
+        randomnessAccount: new PublicKey(randomnessAccount),
+        acceptor: this.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  /**
+   * Settle an accepted PvP challenge using Switchboard VRF randomness
+   * @param challengeAddress The challenge PDA address
+   * @returns Settlement result with winner info
+   */
+  async settleChallenge(challengeAddress: string): Promise<{ tx: string; won: boolean; result: number; winner: string }> {
     await this.loadProgram();
     const challengePda = new PublicKey(challengeAddress);
     const challenge = await this.program.account.challenge.fetch(challengePda);
@@ -2102,30 +2128,51 @@ export class AgentCasino {
       PROGRAM_ID
     );
     const [acceptorStatsPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("agent"), this.wallet.publicKey.toBuffer()],
+      [Buffer.from("agent"), challenge.acceptor.toBuffer()],
       PROGRAM_ID
     );
 
-    const clientSeed = Array.from(randomBytes(32));
-
     const tx = await this.program.methods
-      .acceptChallenge(clientSeed)
+      .settleChallenge()
       .accounts({
         house: this.housePda,
         challenge: challengePda,
         challenger: challenge.challenger,
+        acceptor: challenge.acceptor,
         challengerStats: challengerStatsPda,
         acceptorStats: acceptorStatsPda,
-        acceptor: this.wallet.publicKey,
+        randomnessAccount: challenge.randomnessAccount,
+        settler: this.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
 
     // Fetch result
     await new Promise(r => setTimeout(r, 2000));
-    const result = await this.program.account.challenge.fetch(challengePda);
-    const won = result.winner.toString() === this.wallet.publicKey.toString();
-    return { tx, won, result: result.result };
+    const settled = await this.program.account.challenge.fetch(challengePda);
+    const won = settled.winner.toString() === this.wallet.publicKey.toString();
+    return { tx, won, result: settled.result, winner: settled.winner.toString() };
+  }
+
+  /**
+   * Expire an accepted challenge that wasn't settled within 300 slots (~2 min)
+   * Refunds both players. Anyone can call this.
+   * @param challengeAddress The challenge PDA address
+   */
+  async expireChallenge(challengeAddress: string): Promise<string> {
+    await this.loadProgram();
+    const challengePda = new PublicKey(challengeAddress);
+    const challenge = await this.program.account.challenge.fetch(challengePda);
+
+    return await this.program.methods
+      .expireChallenge()
+      .accounts({
+        challenge: challengePda,
+        challenger: challenge.challenger,
+        acceptor: challenge.acceptor,
+        settler: this.wallet.publicKey,
+      })
+      .rpc();
   }
 
   /**

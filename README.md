@@ -502,7 +502,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 |                        AGENT CASINO                               |
 +------------------------------------------------------------------+
 |                                                                   |
-|  Solana Program (Anchor 0.32.1) — 65 instructions                 |
+|  Solana Program (Anchor 0.32.1) — 67 instructions                 |
 |  +-----------+  +-----------+  +----------+  +-----------+       |
 |  | House     |  | PvP       |  | Memory   |  | Hitman    |       |
 |  | VRF Games |  | Challenges|  | Slots    |  | Market    |       |

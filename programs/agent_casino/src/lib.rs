@@ -281,20 +281,18 @@ pub mod agent_casino {
         Ok(())
     }
 
-    /// Accept a PvP challenge - triggers the coin flip
+    /// Accept a PvP challenge — escrows acceptor's bet, awaits VRF settlement
     /// Acceptor automatically takes the opposite side
     pub fn accept_challenge(
         ctx: Context<AcceptChallenge>,
-        client_seed: [u8; 32],
     ) -> Result<()> {
         let challenge = &ctx.accounts.challenge;
         require!(challenge.status == ChallengeStatus::Open, CasinoError::ChallengeNotOpen);
         require!(challenge.challenger != ctx.accounts.acceptor.key(), CasinoError::CannotAcceptOwnChallenge);
 
         let amount = challenge.amount;
-        let challenger_choice = challenge.choice;
 
-        // Transfer acceptor's bet to the challenge account
+        // Transfer acceptor's bet to the challenge account (both bets now escrowed)
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
@@ -304,26 +302,55 @@ pub mod agent_casino {
         );
         system_program::transfer(cpi_context, amount)?;
 
-        // Generate result
+        // Store VRF account and mark as accepted
         let clock = Clock::get()?;
-        let server_seed = generate_seed(
-            ctx.accounts.acceptor.key(),
-            clock.slot,
-            clock.unix_timestamp,
-            ctx.accounts.challenge.key(),
-        );
-        let combined = combine_seeds(&server_seed, &client_seed, ctx.accounts.challenger.key());
-        let result = (combined[0] % 2) as u8;
+        let challenge_key = ctx.accounts.challenge.key();
+        let acceptor_key = ctx.accounts.acceptor.key();
+        let randomness_key = ctx.accounts.randomness_account.key();
+        let challenge = &mut ctx.accounts.challenge;
+        let challenger_key = challenge.challenger;
+        challenge.status = ChallengeStatus::Accepted;
+        challenge.acceptor = acceptor_key;
+        challenge.randomness_account = randomness_key;
+        challenge.request_slot = clock.slot;
+
+        emit!(ChallengeAccepted {
+            challenge_id: challenge_key,
+            challenger: challenger_key,
+            acceptor: acceptor_key,
+            amount,
+        });
+
+        Ok(())
+    }
+
+    /// Settle an accepted PvP challenge using Switchboard VRF
+    /// Anyone can call this (permissionless settler)
+    pub fn settle_challenge(ctx: Context<SettleChallenge>) -> Result<()> {
+        // Load and validate Switchboard randomness
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.data.borrow()
+        ).map_err(|_| CasinoError::VrfInvalidRandomness)?;
+
+        let clock = Clock::get()?;
+        let randomness = randomness_data.get_value(clock.slot)
+            .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
+
+        // Use first byte for coin flip result
+        let result = (randomness[0] % 2) as u8;
+        let challenge = &ctx.accounts.challenge;
+        let amount = challenge.amount;
+        let challenger_choice = challenge.choice;
 
         // Determine winner
         let challenger_won = result == challenger_choice;
         let winner = if challenger_won {
-            ctx.accounts.challenger.key()
+            challenge.challenger
         } else {
-            ctx.accounts.acceptor.key()
+            challenge.acceptor
         };
 
-        // Calculate payout: total pot minus 1% house edge
+        // Calculate payout: total pot minus house edge
         let total_pot = amount.checked_mul(2).ok_or(CasinoError::MathOverflow)?;
         let house_edge = ctx.accounts.house.house_edge_bps;
         let house_take = total_pot.checked_mul(house_edge as u64).ok_or(CasinoError::MathOverflow)? / 10000;
@@ -347,11 +374,8 @@ pub mod agent_casino {
         // Update challenge state
         let challenge = &mut ctx.accounts.challenge;
         challenge.status = ChallengeStatus::Completed;
-        challenge.acceptor = ctx.accounts.acceptor.key();
         challenge.winner = winner;
         challenge.result = result;
-        challenge.server_seed = server_seed;
-        challenge.client_seed = client_seed;
         challenge.completed_at = clock.unix_timestamp;
 
         // Update house stats
@@ -376,8 +400,11 @@ pub mod agent_casino {
             challenger_stats.losses = challenger_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
-        // Update acceptor stats (already initialized via init_agent_stats)
+        // Update acceptor stats
         let acceptor_stats = &mut ctx.accounts.acceptor_stats;
+        if acceptor_stats.agent == Pubkey::default() {
+            acceptor_stats.agent = ctx.accounts.acceptor.key();
+        }
         acceptor_stats.total_games = acceptor_stats.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.total_wagered = acceptor_stats.total_wagered.checked_add(amount).ok_or(CasinoError::MathOverflow)?;
         acceptor_stats.pvp_games = acceptor_stats.pvp_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
@@ -389,16 +416,51 @@ pub mod agent_casino {
             acceptor_stats.losses = acceptor_stats.losses.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         }
 
-        emit!(ChallengeAccepted {
+        emit!(ChallengeSettled {
             challenge_id: ctx.accounts.challenge.key(),
-            challenger: ctx.accounts.challenger.key(),
-            acceptor: ctx.accounts.acceptor.key(),
+            challenger: ctx.accounts.challenge.challenger,
+            acceptor: ctx.accounts.challenge.acceptor,
             amount,
             challenger_choice,
             result,
             winner,
             payout: winner_payout,
             house_take,
+        });
+
+        Ok(())
+    }
+
+    /// Expire an accepted challenge if VRF not settled within 300 slots
+    /// Refunds both challenger and acceptor
+    pub fn expire_challenge(ctx: Context<ExpireChallenge>) -> Result<()> {
+        let clock = Clock::get()?;
+        let challenge = &ctx.accounts.challenge;
+
+        require!(challenge.status == ChallengeStatus::Accepted, CasinoError::ChallengeNotAccepted);
+
+        let slots_elapsed = clock.slot.checked_sub(challenge.request_slot).ok_or(CasinoError::MathOverflow)?;
+        require!(slots_elapsed >= 300, CasinoError::ChallengeNotExpirable);
+
+        let amount = challenge.amount;
+
+        // Refund both players from challenge escrow
+        **ctx.accounts.challenge.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.challenger.to_account_info().try_borrow_mut_lamports()? += amount;
+
+        **ctx.accounts.challenge.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.acceptor.to_account_info().try_borrow_mut_lamports()? += amount;
+
+        // Mark as expired
+        let challenge = &mut ctx.accounts.challenge;
+        challenge.status = ChallengeStatus::Expired;
+        challenge.completed_at = clock.unix_timestamp;
+
+        emit!(ChallengeExpired {
+            challenge_id: ctx.accounts.challenge.key(),
+            challenger: ctx.accounts.challenge.challenger,
+            acceptor: ctx.accounts.challenge.acceptor,
+            refund: amount,
         });
 
         Ok(())
@@ -2846,26 +2908,6 @@ pub mod agent_casino {
 
 // === Helper Functions ===
 
-/// Seed generation for PvP challenges (clock-based, acceptable for 2-player games)
-fn generate_seed(player: Pubkey, slot: u64, timestamp: i64, house: Pubkey) -> [u8; 32] {
-    let data = [
-        player.to_bytes().as_ref(),
-        &slot.to_le_bytes(),
-        &timestamp.to_le_bytes(),
-        house.to_bytes().as_ref(),
-    ].concat();
-    hash(&data).to_bytes()
-}
-
-fn combine_seeds(server: &[u8; 32], client: &[u8; 32], player: Pubkey) -> [u8; 32] {
-    let combined = [
-        server.as_ref(),
-        client.as_ref(),
-        player.to_bytes().as_ref(),
-    ].concat();
-    hash(&combined).to_bytes()
-}
-
 fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
     let gross_128 = (amount as u128).saturating_mul(multiplier as u128) / 100;
     // Cap at u64::MAX (caller should validate payout fits in pool)
@@ -3081,12 +3123,28 @@ pub struct CreateChallenge<'info> {
 
 #[derive(Accounts)]
 pub struct AcceptChallenge<'info> {
+    #[account(
+        mut,
+        constraint = challenge.status == ChallengeStatus::Open @ CasinoError::ChallengeNotOpen
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    /// CHECK: Switchboard randomness account — stored for settle phase
+    pub randomness_account: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub acceptor: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SettleChallenge<'info> {
     #[account(mut, seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
 
     #[account(
         mut,
-        constraint = challenge.status == ChallengeStatus::Open @ CasinoError::ChallengeNotOpen
+        constraint = challenge.status == ChallengeStatus::Accepted @ CasinoError::ChallengeNotAccepted
     )]
     pub challenge: Account<'info, Challenge>,
 
@@ -3097,6 +3155,13 @@ pub struct AcceptChallenge<'info> {
     )]
     pub challenger: AccountInfo<'info>,
 
+    /// CHECK: The acceptor, verified by challenge.acceptor
+    #[account(
+        mut,
+        constraint = acceptor.key() == challenge.acceptor @ CasinoError::InvalidCreatorAccount
+    )]
+    pub acceptor: AccountInfo<'info>,
+
     #[account(
         mut,
         seeds = [b"agent", challenge.challenger.as_ref()],
@@ -3106,14 +3171,43 @@ pub struct AcceptChallenge<'info> {
 
     #[account(
         mut,
-        seeds = [b"agent", acceptor.key().as_ref()],
+        seeds = [b"agent", challenge.acceptor.as_ref()],
         bump
     )]
     pub acceptor_stats: Account<'info, AgentStats>,
 
+    /// CHECK: Switchboard randomness account — validated against challenge
+    #[account(constraint = randomness_account.key() == challenge.randomness_account @ CasinoError::VrfInvalidRandomness)]
+    pub randomness_account: UncheckedAccount<'info>,
+
     #[account(mut)]
-    pub acceptor: Signer<'info>,
+    pub settler: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ExpireChallenge<'info> {
+    #[account(
+        mut,
+        constraint = challenge.status == ChallengeStatus::Accepted @ CasinoError::ChallengeNotAccepted
+    )]
+    pub challenge: Account<'info, Challenge>,
+
+    /// CHECK: The original challenger, verified by challenge.challenger
+    #[account(
+        mut,
+        constraint = challenger.key() == challenge.challenger @ CasinoError::InvalidChallenger
+    )]
+    pub challenger: AccountInfo<'info>,
+
+    /// CHECK: The acceptor, verified by challenge.acceptor
+    #[account(
+        mut,
+        constraint = acceptor.key() == challenge.acceptor @ CasinoError::InvalidCreatorAccount
+    )]
+    pub acceptor: AccountInfo<'info>,
+
+    pub settler: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -4116,6 +4210,8 @@ pub struct Challenge {
     pub created_at: i64,
     pub completed_at: i64,
     pub nonce: u64,
+    pub randomness_account: Pubkey,  // Switchboard VRF account for fair settlement
+    pub request_slot: u64,           // Slot when accepted (for VRF expiry)
     pub bump: u8,
 }
 
@@ -4416,6 +4512,8 @@ pub enum ChallengeStatus {
     Open,
     Completed,
     Cancelled,
+    Accepted,  // Acceptor joined, awaiting VRF settlement
+    Expired,   // VRF not settled in time, both refunded
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -4513,11 +4611,27 @@ pub struct ChallengeAccepted {
     pub challenger: Pubkey,
     pub acceptor: Pubkey,
     pub amount: u64,
+}
+
+#[event]
+pub struct ChallengeSettled {
+    pub challenge_id: Pubkey,
+    pub challenger: Pubkey,
+    pub acceptor: Pubkey,
+    pub amount: u64,
     pub challenger_choice: u8,
     pub result: u8,
     pub winner: Pubkey,
     pub payout: u64,
     pub house_take: u64,
+}
+
+#[event]
+pub struct ChallengeExpired {
+    pub challenge_id: Pubkey,
+    pub challenger: Pubkey,
+    pub acceptor: Pubkey,
+    pub refund: u64,
 }
 
 #[event]
@@ -4920,6 +5034,7 @@ pub struct CloseChallenge<'info> {
         mut,
         close = recipient,
         constraint = challenge.status != ChallengeStatus::Open @ CasinoError::NotCloseable,
+        constraint = challenge.status != ChallengeStatus::Accepted @ CasinoError::NotCloseable,
     )]
     pub challenge: Account<'info, Challenge>,
 
@@ -5466,4 +5581,9 @@ pub enum CasinoError {
     LotteryNotCancelled,
     #[msg("Price feed does not match prediction")]
     PriceFeedMismatch,
+    // VRF PvP errors
+    #[msg("Challenge is not in accepted state")]
+    ChallengeNotAccepted,
+    #[msg("Challenge has not been accepted long enough to expire (300 slots)")]
+    ChallengeNotExpirable,
 }

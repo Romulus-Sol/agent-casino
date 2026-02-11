@@ -48,7 +48,7 @@ agent-casino/
 
 **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 
-**Key Instructions (65 total):**
+**Key Instructions (67 total):**
 - `initialize_house(house_edge_bps, min_bet, max_bet_percent)` - Set up the casino
 - `add_liquidity(amount)` / `remove_liquidity(amount)` - LP management
 - `vrf_coin_flip_request/settle` - VRF coin flip (2-step)
@@ -56,7 +56,7 @@ agent-casino/
 - `vrf_limbo_request/settle` - VRF limbo (2-step)
 - `vrf_crash_request/settle` - VRF crash (2-step)
 - `expire_vrf_request` - Refund if VRF not settled within 300 slots
-- `create_challenge/accept_challenge` - PvP
+- `create_challenge/accept_challenge/settle_challenge/expire_challenge` - VRF PvP (3-step)
 - `deposit_memory/pull_memory/rate_memory` - Memory Slots
 - `create_hit/claim_hit/submit_proof/verify_hit/arbitrate_hit` - Hitman Market
 - `create_lottery/buy_lottery_ticket/draw_lottery_winner/claim_lottery_prize/close_lottery` - Lottery Pool

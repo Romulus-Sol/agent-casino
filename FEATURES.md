@@ -1154,7 +1154,7 @@ class HitmanMarket {
 - [x] Security audit #8: 15 fixes (lottery pool accounting, cancel/refund flow, creator-only draw, rejection sampling)
 - [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
-- [x] SDK covers all game + feature instructions (65 on-chain, core game/feature methods in SDK)
+- [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
 - [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 135 fixed)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)

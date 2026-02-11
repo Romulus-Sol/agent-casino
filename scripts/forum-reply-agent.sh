@@ -172,7 +172,7 @@ WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or re
 - 10 security audits (NOT '10 integrations' or '10 partnerships' — audits only), 157 vulnerabilities found, 135 fixed
 - 80 tests (69 SDK + 11 on-chain)
 - 100% AI-built, 1 merged external PR (MoltLaunch high-roller tables)
-- 65 Anchor instructions deployed on devnet
+- 67 Anchor instructions deployed on devnet
 
 LIVE ON-CHAIN STATS (just fetched from devnet — use these numbers, NEVER guess or use old numbers):
 - Total games played: $ONCHAIN_TOTAL_GAMES

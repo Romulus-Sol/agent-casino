@@ -17,7 +17,7 @@
 | INFO | 7 | 0 | 0 | 7 |
 | **Total** | **32** | **10** | **9** | **13** |
 
-**All fixable findings deployed.** TX: `2xT7DchXEsneEJNoavco2A5bbYP3tG2ZejFvQyb1KDJEi2rrdVS8bCSE5h6PURuzVJArdNLmswj8xxQuve3NpKDW`
+**All fixable findings deployed.** H-1 (PvP clock randomness) fixed with VRF 3-step flow (+2 instructions: settle_challenge, expire_challenge).
 
 ---
 
@@ -25,11 +25,10 @@
 
 ### H-1: PvP Challenge uses predictable clock-based randomness
 - **Lines:** 307-316
-- **Status:** NEEDS REDEPLOY (known limitation, documented)
+- **Status:** FIXED (on-chain deployed)
 - **Impact:** Acceptor can compute outcome before submitting, front-running the result.
-- **Description:** `accept_challenge` generates the coin flip using `Clock::slot` + `Clock::unix_timestamp` + acceptor-supplied `client_seed`. All other games use Switchboard VRF but PvP was never migrated.
-- **Mitigation:** PvP is rarely used (~0 games on-chain). Would need new `vrf_pvp_request/settle` instructions.
-- **Fix plan:** Add VRF-backed PvP in post-hackathon upgrade.
+- **Description:** `accept_challenge` generated the coin flip using `Clock::slot` + `Clock::unix_timestamp` + acceptor-supplied `client_seed`. All other games use Switchboard VRF but PvP was never migrated.
+- **On-chain fix:** Refactored PvP into 3-step VRF flow: `accept_challenge` (escrow only) → `settle_challenge` (Switchboard VRF) → `expire_challenge` (300-slot timeout refund). Removed clock-based `generate_seed`/`combine_seeds` helpers.
 
 ### H-2: `resolve_prediction_market` — authority-supplied `winning_pool` with no bound check
 - **Lines:** 714-757

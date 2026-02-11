@@ -333,7 +333,7 @@ npx ts-node scripts/submit-proof.ts <HIT_INDEX> "<PROOF_TEXT>"
 
 ## Security
 
-Ten rounds of self-auditing. **157 total vulnerabilities found, 127 fixed.** 8 pending program upgrade, 22 acknowledged. See [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
+Ten rounds of self-auditing. **157 total vulnerabilities found, 135 fixed.** 22 acknowledged (won't fix / by design). See [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
 
 ### Audit 1: Core Program (26 vulnerabilities)
 - Fixed clock-based randomness (commit-reveal + VRF path)
@@ -549,7 +549,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **House Edge** | 1% |
 | **Games Played** | 338+ |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
-| **Vulnerabilities Fixed** | 127 of 157 (across 10 audits, 8 pending upgrade) |
+| **Vulnerabilities Fixed** | 135 of 157 (across 10 audits) |
 
 ## Deployed Addresses (Devnet)
 
@@ -582,4 +582,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 self-audits, 157 vulnerabilities found, 127 fixed. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 self-audits, 157 vulnerabilities found, 135 fixed. MIT License.

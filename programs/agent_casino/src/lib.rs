@@ -722,6 +722,8 @@ pub mod agent_casino {
             CasinoError::MarketNotOpen
         );
         require!(winning_project.len() > 0 && winning_project.len() <= 50, CasinoError::InvalidProjectSlug);
+        // Audit #10 H-2: bound check — winning_pool cannot exceed total_pool
+        require!(winning_pool <= market.total_pool, CasinoError::MathOverflow);
         require!(
             ctx.accounts.authority.key() == market.authority,
             CasinoError::NotMarketAuthority
@@ -2339,6 +2341,8 @@ pub mod agent_casino {
         let house = &mut ctx.accounts.house;
         house.total_games = house.total_games.checked_add(1).ok_or(CasinoError::MathOverflow)?;
         house.total_volume = house.total_volume.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
+        // Audit #10 M-2: track prediction escrow in pool
+        house.pool = house.pool.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PricePredictionCreated {
             prediction: prediction_key,
@@ -2387,6 +2391,8 @@ pub mod agent_casino {
         // Update house volume
         let house = &mut ctx.accounts.house;
         house.total_volume = house.total_volume.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
+        // Audit #10 M-2: track taker's escrow in pool
+        house.pool = house.pool.checked_add(bet_amount).ok_or(CasinoError::MathOverflow)?;
 
         emit!(PricePredictionTaken {
             prediction: prediction_key,
@@ -2476,7 +2482,9 @@ pub mod agent_casino {
         // Update house stats
         let house = &mut ctx.accounts.house;
         house.total_payout = house.total_payout.checked_add(payout).ok_or(CasinoError::MathOverflow)?;
-        house.pool = house.pool.checked_add(house_take).ok_or(CasinoError::MathOverflow)?;
+        // Audit #10 M-2: subtract full escrow, keep only house_take
+        house.pool = house.pool.checked_sub(total_pool).ok_or(CasinoError::MathOverflow)?
+            .checked_add(house_take).ok_or(CasinoError::MathOverflow)?;
 
         // Update prediction
         let prediction = &mut ctx.accounts.price_prediction;
@@ -2717,9 +2725,9 @@ pub mod agent_casino {
         let prize = lottery.prize;
         require!(prize > 0, CasinoError::InvalidAmount);
 
-        // Fix #2: check house has enough lamports before deduction
+        // Fix #2: check house has enough lamports before deduction (Audit #10 M-3: >= not >)
         let house_lamports = ctx.accounts.house.to_account_info().lamports();
-        require!(house_lamports > prize, CasinoError::InsufficientLiquidity);
+        require!(house_lamports >= prize, CasinoError::InsufficientLiquidity);
 
         let lottery_key = ctx.accounts.lottery.key();
         let winner_key = ctx.accounts.winner.key();
@@ -2817,6 +2825,10 @@ pub mod agent_casino {
         // Refund creator
         **ctx.accounts.house.to_account_info().try_borrow_mut_lamports()? -= refund;
         **ctx.accounts.creator.to_account_info().try_borrow_mut_lamports()? += refund;
+
+        // Audit #10 M-2: subtract escrowed amount from pool on cancel
+        let house = &mut ctx.accounts.house;
+        house.pool = house.pool.checked_sub(refund).ok_or(CasinoError::MathOverflow)?;
 
         // Update prediction
         let prediction = &mut ctx.accounts.price_prediction;
@@ -3678,8 +3690,7 @@ pub struct InitializeTokenVault<'info> {
     pub authority: Signer<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-    /// CHECK: Rent sysvar
-    pub rent: UncheckedAccount<'info>,
+    // Audit #10 L-6: removed unused rent UncheckedAccount (Rent::get() reads from sysvar cache)
 }
 
 #[derive(Accounts)]
@@ -3752,7 +3763,8 @@ pub struct VrfCoinFlipSettle<'info> {
     #[account(
         mut,
         constraint = vrf_request.game_type == GameType::CoinFlip @ CasinoError::VrfInvalidRandomness,
-        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness
     )]
     pub vrf_request: Account<'info, VrfRequest>,
 
@@ -3808,7 +3820,8 @@ pub struct VrfDiceRollSettle<'info> {
     #[account(
         mut,
         constraint = vrf_request.game_type == GameType::DiceRoll @ CasinoError::VrfInvalidRandomness,
-        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness
     )]
     pub vrf_request: Account<'info, VrfRequest>,
 
@@ -3864,7 +3877,8 @@ pub struct VrfLimboSettle<'info> {
     #[account(
         mut,
         constraint = vrf_request.game_type == GameType::Limbo @ CasinoError::VrfInvalidRandomness,
-        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness
     )]
     pub vrf_request: Account<'info, VrfRequest>,
 
@@ -3920,7 +3934,8 @@ pub struct VrfCrashSettle<'info> {
     #[account(
         mut,
         constraint = vrf_request.game_type == GameType::Crash @ CasinoError::VrfInvalidRandomness,
-        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled
+        constraint = vrf_request.status == VrfStatus::Pending @ CasinoError::VrfAlreadySettled,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness
     )]
     pub vrf_request: Account<'info, VrfRequest>,
 
@@ -4869,8 +4884,8 @@ pub struct CloseGameRecord<'info> {
     )]
     pub game_record: Account<'info, GameRecord>,
 
-    /// CHECK: Rent recipient
-    #[account(mut)]
+    /// CHECK: Rent recipient — Audit #10 M-4: constrained to original player
+    #[account(mut, constraint = recipient.key() == game_record.player @ CasinoError::InvalidCreatorAccount)]
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
@@ -4882,15 +4897,17 @@ pub struct CloseVrfRequest<'info> {
     #[account(seeds = [b"house"], bump = house.bump)]
     pub house: Account<'info, House>,
 
+    // Audit #10 M-5: added constraint for house match
     #[account(
         mut,
         close = recipient,
         constraint = vrf_request.status != VrfStatus::Pending @ CasinoError::NotCloseable,
+        constraint = vrf_request.house == house.key() @ CasinoError::VrfInvalidRandomness,
     )]
     pub vrf_request: Account<'info, VrfRequest>,
 
-    /// CHECK: Rent recipient
-    #[account(mut)]
+    /// CHECK: Rent recipient — Audit #10 M-4: constrained to original player
+    #[account(mut, constraint = recipient.key() == vrf_request.player @ CasinoError::InvalidCreatorAccount)]
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]
@@ -4925,11 +4942,13 @@ pub struct ClosePricePrediction<'info> {
         constraint = price_prediction.status == PredictionStatus::Settled
             || price_prediction.status == PredictionStatus::Cancelled
             @ CasinoError::NotCloseable,
+        // Audit #10 L-10: validate house match
+        constraint = price_prediction.house == house.key() @ CasinoError::InvalidCreatorAccount,
     )]
     pub price_prediction: Account<'info, PricePrediction>,
 
-    /// CHECK: Rent recipient
-    #[account(mut)]
+    /// CHECK: Rent recipient — Audit #10 M-4: constrained to creator
+    #[account(mut, constraint = recipient.key() == price_prediction.creator @ CasinoError::NotPriceBetCreator)]
     pub recipient: AccountInfo<'info>,
 
     #[account(constraint = authority.key() == house.authority @ CasinoError::NotAuthority)]

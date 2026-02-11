@@ -946,7 +946,7 @@ Our dual oracle approach: **Switchboard VRF** for game randomness, **Pyth price 
 
 ## Security Audit Methodology
 
-Ten security audits, 157 vulnerabilities found, 127 fixed, 8 pending redeploy (program is upgradeable), 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full Audit #10 report: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
+Ten security audits, 157 vulnerabilities found, 135 fixed, 9 won't fix, 13 by design. Our audit process and checklist are public — use them for your own projects. Full Audit #10 report: [SECURITY_AUDIT_10.md](./SECURITY_AUDIT_10.md).
 
 ### Audit Summary
 
@@ -961,8 +961,8 @@ Ten security audits, 157 vulnerabilities found, 127 fixed, 8 pending redeploy (p
 | 7 | VRF demo verification | 5 | 5 |
 | 8 | Lottery security | 15 | 15 |
 | 9 | Final pre-submission | 12 | 12 |
-| 10 | Full pre-submission (4 parallel agents) | 32 | 2 SDK + 8 pending |
-| **Total** | | **157** | **127 + 8 pending** |
+| 10 | Full pre-submission (4 parallel agents) | 32 | 10 (2 SDK + 8 on-chain) |
+| **Total** | | **157** | **135** |
 
 ### Reusable Security Checklist
 
@@ -1155,7 +1155,7 @@ class HitmanMarket {
 - [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
 - [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (65 on-chain, core game/feature methods in SDK)
-- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 127 fixed)
+- [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 135 fixed)
 - [x] Lottery pool with VRF-drawn winners (on-chain)
 - [x] Auto-play bot (multi-game, all 4 VRF game types)
 - [x] Tournament mode (multi-round elimination)

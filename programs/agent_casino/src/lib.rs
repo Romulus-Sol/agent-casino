@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use anchor_spl::token::{self, Token, Transfer};
@@ -183,7 +185,7 @@ pub mod agent_casino {
             total_games: house.total_games,
             total_volume: house.total_volume,
             total_payout: house.total_payout,
-            house_profit: house.total_volume.checked_sub(house.total_payout).unwrap_or(0),
+            house_profit: house.total_volume.saturating_sub(house.total_payout),
         })
     }
 
@@ -217,7 +219,7 @@ pub mod agent_casino {
                 )?;
             }
 
-            agent_stats_info.realloc(expected_size, false)?;
+            agent_stats_info.resize(expected_size)?;
 
             // Return excess rent to agent if account shrank
             if current_lamports > new_min_balance {
@@ -337,7 +339,7 @@ pub mod agent_casino {
             .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
 
         // Use first byte for coin flip result
-        let result = (randomness[0] % 2) as u8;
+        let result = randomness[0] % 2;
         let challenge = &ctx.accounts.challenge;
         let amount = challenge.amount;
         let challenger_choice = challenge.choice;
@@ -686,7 +688,7 @@ pub mod agent_casino {
     ) -> Result<()> {
         let market = &ctx.accounts.market;
         require!(market.status == MarketStatus::Revealing, CasinoError::NotInRevealPhase);
-        require!(predicted_project.len() > 0 && predicted_project.len() <= 50, CasinoError::InvalidProjectSlug);
+        require!(!predicted_project.is_empty() && predicted_project.len() <= 50, CasinoError::InvalidProjectSlug);
 
         let clock = Clock::get()?;
         require!(clock.unix_timestamp < market.reveal_deadline, CasinoError::RevealPhaseClosed);
@@ -783,7 +785,7 @@ pub mod agent_casino {
             market.status == MarketStatus::Revealing,
             CasinoError::MarketNotOpen
         );
-        require!(winning_project.len() > 0 && winning_project.len() <= 50, CasinoError::InvalidProjectSlug);
+        require!(!winning_project.is_empty() && winning_project.len() <= 50, CasinoError::InvalidProjectSlug);
         // Audit #10 H-2: bound check — winning_pool cannot exceed total_pool
         require!(winning_pool <= market.total_pool, CasinoError::MathOverflow);
         require!(
@@ -923,7 +925,7 @@ pub mod agent_casino {
         // effective_fee_bps = house_edge_bps * (1 - early_factor)
         let base_fee_bps = ctx.accounts.house.house_edge_bps as u64;
         let fee_discount_bps = base_fee_bps.checked_mul(early_factor_bps).ok_or(CasinoError::MathOverflow)? / 10000;
-        let effective_fee_bps = base_fee_bps.checked_sub(fee_discount_bps).unwrap_or(0);
+        let effective_fee_bps = base_fee_bps.saturating_sub(fee_discount_bps);
 
         // Calculate fee amount on gross winnings
         let fee = (gross_winnings as u128)
@@ -1072,7 +1074,7 @@ pub mod agent_casino {
         category: MemoryCategory,
         rarity: MemoryRarity,
     ) -> Result<()> {
-        require!(content.len() > 0 && content.len() <= 500, CasinoError::MemoryContentInvalid);
+        require!(!content.is_empty() && content.len() <= 500, CasinoError::MemoryContentInvalid);
 
         let pool = &ctx.accounts.memory_pool;
         let stake_amount = pool.stake_amount;
@@ -1218,7 +1220,7 @@ pub mod agent_casino {
         ctx: Context<RateMemory>,
         rating: u8,
     ) -> Result<()> {
-        require!(rating >= 1 && rating <= 5, CasinoError::InvalidRating);
+        require!((1..=5).contains(&rating), CasinoError::InvalidRating);
 
         let pull_record = &ctx.accounts.pull_record;
         require!(pull_record.rating.is_none(), CasinoError::AlreadyRated);
@@ -1426,7 +1428,7 @@ pub mod agent_casino {
 
     /// Submit proof that hit was completed
     pub fn submit_proof(ctx: Context<SubmitProof>, proof_link: String) -> Result<()> {
-        require!(proof_link.len() >= 1 && proof_link.len() <= 500, CasinoError::ProofLinkInvalid);
+        require!(!proof_link.is_empty() && proof_link.len() <= 500, CasinoError::ProofLinkInvalid);
 
         let hit = &ctx.accounts.hit;
         require!(hit.status == HitStatus::Claimed, CasinoError::HitNotClaimed);
@@ -1877,7 +1879,7 @@ pub mod agent_casino {
             .map_err(|_| CasinoError::VrfRandomnessNotReady)?;
 
         // Use first byte for coin flip result
-        let result = (randomness[0] % 2) as u8;
+        let result = randomness[0] % 2;
         let vrf_request = &ctx.accounts.vrf_request;
         let won = result == vrf_request.choice;
 
@@ -1928,7 +1930,7 @@ pub mod agent_casino {
         emit!(VrfRequestSettled {
             request: request_key,
             player: player_key,
-            randomness: randomness,
+            randomness,
             result,
             payout,
             won,
@@ -1945,7 +1947,7 @@ pub mod agent_casino {
         amount: u64,
         target: u8,
     ) -> Result<()> {
-        require!(target >= 1 && target <= 5, CasinoError::InvalidTarget);
+        require!((1..=5).contains(&target), CasinoError::InvalidTarget);
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
@@ -2062,7 +2064,7 @@ pub mod agent_casino {
         emit!(VrfRequestSettled {
             request: request_key,
             player: player_key,
-            randomness: randomness,
+            randomness,
             result,
             payout,
             won,
@@ -2079,7 +2081,7 @@ pub mod agent_casino {
         amount: u64,
         target_multiplier: u16,
     ) -> Result<()> {
-        require!(target_multiplier >= 101 && target_multiplier <= 10000, CasinoError::InvalidMultiplier);
+        require!((101..=10000).contains(&target_multiplier), CasinoError::InvalidMultiplier);
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
@@ -2199,7 +2201,7 @@ pub mod agent_casino {
         emit!(VrfRequestSettled {
             request: request_key,
             player: player_key,
-            randomness: randomness,
+            randomness,
             result,
             payout,
             won,
@@ -2216,7 +2218,7 @@ pub mod agent_casino {
         amount: u64,
         cashout_multiplier: u16,
     ) -> Result<()> {
-        require!(cashout_multiplier >= 101 && cashout_multiplier <= 10000, CasinoError::InvalidMultiplier);
+        require!((101..=10000).contains(&cashout_multiplier), CasinoError::InvalidMultiplier);
 
         let house = &ctx.accounts.house;
         require!(amount >= house.min_bet, CasinoError::BetTooSmall);
@@ -2336,7 +2338,7 @@ pub mod agent_casino {
         emit!(VrfRequestSettled {
             request: request_key,
             player: player_key,
-            randomness: randomness,
+            randomness,
             result,
             payout,
             won,
@@ -2359,7 +2361,7 @@ pub mod agent_casino {
     ) -> Result<()> {
         let house = &ctx.accounts.house;
         require!(bet_amount >= house.min_bet, CasinoError::BetTooSmall);
-        require!(duration_seconds >= 60 && duration_seconds <= 86400 * 7, CasinoError::InvalidDuration);
+        require!((60..=86400 * 7).contains(&duration_seconds), CasinoError::InvalidDuration);
         require!(target_price > 0, CasinoError::InvalidTargetPrice);
 
         // Transfer bet to house escrow
@@ -2624,7 +2626,7 @@ pub mod agent_casino {
         end_slot: u64,
     ) -> Result<()> {
         require!(ticket_price >= 1000, CasinoError::InvalidAmount); // min 0.000001 SOL
-        require!(max_tickets >= 2 && max_tickets <= 1000, CasinoError::LotteryInvalidTickets);
+        require!((2..=1000).contains(&max_tickets), CasinoError::LotteryInvalidTickets);
 
         let clock = Clock::get()?;
         // Fix #11: minimum 100 slots (~40s) duration
@@ -2914,7 +2916,7 @@ fn calculate_payout(amount: u64, multiplier: u16, house_edge_bps: u16) -> u64 {
     let gross = if gross_128 > u64::MAX as u128 { u64::MAX } else { gross_128 as u64 };
     let edge = (gross as u128).saturating_mul(house_edge_bps as u128) / 10000;
     let edge = if edge > u64::MAX as u128 { u64::MAX } else { edge as u64 };
-    gross.checked_sub(edge).unwrap_or(0)
+    gross.saturating_sub(edge)
 }
 
 fn calculate_limbo_result(raw: u32, house_edge_bps: u16) -> u16 {
@@ -3646,7 +3648,7 @@ pub struct VerifyHit<'info> {
     /// CHECK: Hunter account to receive payout - validated against hit
     #[account(
         mut,
-        constraint = hit.hunter.map_or(false, |h| hunter.key() == h) @ CasinoError::NotTheHunter
+        constraint = hit.hunter.is_some_and(|h| hunter.key() == h) @ CasinoError::NotTheHunter
     )]
     pub hunter: AccountInfo<'info>,
 
@@ -3743,7 +3745,7 @@ pub struct ArbitrateHit<'info> {
     /// CHECK: Hunter account for potential payout - validated against hit
     #[account(
         mut,
-        constraint = hit.hunter.map_or(false, |h| hunter.key() == h) @ CasinoError::NotTheHunter
+        constraint = hit.hunter.is_some_and(|h| hunter.key() == h) @ CasinoError::NotTheHunter
     )]
     pub hunter: AccountInfo<'info>,
 

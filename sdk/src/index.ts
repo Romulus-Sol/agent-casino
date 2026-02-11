@@ -2303,7 +2303,6 @@ export class AgentCasino {
    */
   async createPredictionMarket(
     question: string,
-    outcomes: string[],
     commitDeadlineUnix: number,
     revealDeadlineUnix: number,
     marketId?: number
@@ -2317,7 +2316,7 @@ export class AgentCasino {
     );
 
     const tx = await this.program.methods
-      .createPredictionMarket(mId, question, outcomes, new BN(commitDeadlineUnix), new BN(revealDeadlineUnix))
+      .createPredictionMarket(mId, question, new BN(commitDeadlineUnix), new BN(revealDeadlineUnix))
       .accounts({
         house: this.housePda,
         market: marketPda,
@@ -2392,7 +2391,7 @@ export class AgentCasino {
     );
 
     return await this.program.methods
-      .revealPredictionBet(predictedProject, Array.from(salt), new BN(0))
+      .revealPredictionBet(predictedProject, Array.from(salt))
       .accounts({
         house: this.housePda,
         market: marketPda,

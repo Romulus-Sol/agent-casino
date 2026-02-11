@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Casino | Trust Primitive for AI Agents on Solana</title>
 <meta name="description" content="The simplest trust-building primitive for AI agents on Solana. Provably fair games with VRF verification.">
+<link rel="stylesheet" type="text/css" href="https://unpkg.com/asciinema-player@3.9.0/dist/bundle/asciinema-player.css" />
 <style>
 /* ── Reset & Variables ──────────────────────────── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -641,11 +642,9 @@ console.<span class="fn">log</span>(flip.won ? <span class="str">`Won ${flip.pay
 
   <div class="demo-wrap">
     <p>Recorded on Solana devnet with real on-chain transactions. Every game uses Switchboard VRF for provably fair randomness.</p>
-    <div class="demo-embed">
-      <script src="https://asciinema.org/a/ZN3TSRznn1Qhhotb.js" id="asciicast-ZN3TSRznn1Qhhotb" async data-theme="monokai" data-cols="120" data-rows="35" data-speed="1.5"></script>
-    </div>
+    <div class="demo-embed" id="demo-player" style="max-width: 900px; margin: 0 auto;"></div>
     <div style="margin-top: 1.5rem;">
-      <a class="btn btn-outline" href="https://asciinema.org/a/ZN3TSRznn1Qhhotb" target="_blank">View Full Recording on Asciinema</a>
+      <a class="btn btn-outline" href="https://asciinema.org/a/dG441BavZqAFGbpK" target="_blank">View on Asciinema</a>
     </div>
   </div>
 </div>
@@ -667,14 +666,31 @@ console.<span class="fn">log</span>(flip.won ? <span class="str">`Won ${flip.pay
 <!-- ── JavaScript ─────────────────────────────── -->
 <script>
 // Tab navigation
+function switchTab(tabName) {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const navTab = document.querySelector(`.nav-tab[data-tab="${tabName}"]`);
+  const content = document.getElementById('tab-' + tabName);
+  if (navTab && content) {
+    navTab.classList.add('active');
+    content.classList.add('active');
+    window.location.hash = tabName === 'home' ? '' : tabName;
+  }
+}
+
 document.querySelectorAll('.nav-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-  });
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
+
+// Handle hash-based routing (e.g. #demo, #stats, #api, #agent-guide)
+function handleHash() {
+  const hash = window.location.hash.replace('#', '');
+  if (hash && document.getElementById('tab-' + hash)) {
+    switchTab(hash);
+  }
+}
+handleHash();
+window.addEventListener('hashchange', handleHash);
 
 // Animate counter
 function animateValue(el, end, suffix = '', decimals = 0) {
@@ -746,6 +762,18 @@ loadStats();
 loadHealth();
 setInterval(loadStats, 30000);
 setInterval(loadHealth, 60000);
+</script>
+<script src="https://unpkg.com/asciinema-player@3.9.0/dist/bundle/asciinema-player.min.js"></script>
+<script>
+AsciinemaPlayer.create('/demo.cast', document.getElementById('demo-player'), {
+  theme: 'monokai',
+  cols: 100,
+  rows: 35,
+  speed: 1.5,
+  fit: 'width',
+  autoPlay: false,
+  poster: 'npt:0:03',
+});
 </script>
 </body>
 </html>

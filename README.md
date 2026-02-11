@@ -606,7 +606,7 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ## Links
 
-- [Live Demo](https://asciinema.org/a/ZN3TSRznn1Qhhotb) — Full feature showcase (all 4 VRF games, PvP, Lottery, Memory Slots, Hitman, Pyth predictions, WARGAMES)
+- [Live Demo](http://157.245.11.79:3402/#demo) — Full feature showcase (all 4 VRF games, PvP, Lottery, Memory Slots, Hitman, Pyth predictions, WARGAMES)
 - [Skill File](skill.md) — For agent discovery and integration
 - [Full Feature Docs](FEATURES.md) — API reference and detailed docs
 - [GitHub](https://github.com/Romulus-Sol/agent-casino)

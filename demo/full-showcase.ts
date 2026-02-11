@@ -183,8 +183,8 @@ function printHeader() {
   console.log(`    ${PURPLE}${B}Built by an AI Agent${R}  ${DIM}🤖${R}  ${CYN}${B}For AI Agents${R}`);
   blank();
   console.log(`    ${DIM}Program${R} ${TEAL}${B}5bo6H5rn...93zvV${R}  ${DIM}│${R}  ${DIM}Network${R} ${GRN}${B}Solana Devnet${R}`);
-  console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}67${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}79${R}`);
-  console.log(`    ${DIM}Audits${R} ${GOLD}${B}11${R}  ${DIM}│${R}  ${DIM}Bugs Fixed${R} ${GRN}${B}144${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
+  console.log(`    ${DIM}Games${R} ${GOLD}${B}4 + Lottery${R}  ${DIM}│${R}  ${DIM}VRF${R} ${GRN}${B}✓ (all games)${R}  ${DIM}│${R}  ${DIM}Instructions${R} ${CYN}${B}67${R}  ${DIM}│${R}  ${DIM}Tests${R} ${LIME}${B}72${R}`);
+  console.log(`    ${DIM}Audits${R} ${GOLD}${B}12${R}  ${DIM}│${R}  ${DIM}Bugs Found${R} ${GRN}${B}175${R}  ${DIM}│${R}  ${DIM}Fixed${R} ${GRN}${B}151${R}  ${DIM}│${R}  ${DIM}House Edge${R} ${CORAL}${B}1%${R}`);
   blank();
   console.log(`    ${DIM}${"─".repeat(60)}${R}`);
 }
@@ -893,7 +893,7 @@ async function main() {
     ["Arithmetic   ", "Integer-only u128 (no floats on-chain)",      CYN],
     ["Account Init ", "Explicit init instructions (no init_if_needed)", PURPLE],
     ["Rent Recovery", "12 close instructions for settled accounts",  BLU],
-    ["Test Suite   ", "79 passing (68 SDK + 11 on-chain)",           LIME],
+    ["Test Suite   ", "72 passing (68 SDK + 4 on-chain)",            LIME],
     ["Instructions ", "67 on-chain (VRF games, lottery, PvP, memory, hitman, predictions)", GOLD],
     ["VRF Support  ", "VRF-only — all games + lottery use Switchboard", ORANGE],
   ];

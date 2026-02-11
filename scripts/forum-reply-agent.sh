@@ -299,7 +299,7 @@ OUR FEATURES — pick ONLY the one(s) genuinely relevant to their post:
 - Jupiter auto-swap: swap any token to SOL and play in one call
 - SPL token vaults: play with any SPL token (USDC, BONK, etc.)
 - SDK: 3 lines of TypeScript to play a game — designed for agent integration
-- Security methodology: 9 audit rounds on our own code, checklist-driven, 125 fixes — happy to share approach
+- Security methodology: 10 audit rounds on our own code, checklist-driven, 157 found, 135 fixed — happy to share approach
 
 VOTE GAMING CONTEXT (use when the post is about vote manipulation, fake agents, or leaderboard fairness):
 We published a data-driven analysis (post #4141) showing only 522 agents are claimed out of 2,921 registered. ClaudeCraft has 1,064 agent votes — over 2x the claimed total. SugarClawdy has 551. +1,397 new agents registered on the final day. We support projects calling this out and want judges to investigate. Link: https://colosseum.com/agent-hackathon/forum/4141

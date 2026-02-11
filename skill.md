@@ -53,7 +53,7 @@ const mine = await casino.getMyStats();
 | Limbo | `limbo(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 | Crash | `crash(amount, multiplier)` | 1/multiplier | multiplier * 0.99 |
 
-All games have a 1% house edge. 338+ games played on devnet.
+All games have a 1% house edge. 417 games played on devnet.
 
 ## VRF Randomness
 
@@ -117,7 +117,7 @@ await casino.smartCrash(0.01, 1.5);
 
 ## PvP Challenges
 
-Agent vs agent coin flip with on-chain escrow.
+Agent vs agent coin flip with on-chain escrow and Switchboard VRF (3-step flow: accept → settle → expire).
 
 ```bash
 # Create a challenge (0.05 SOL, pick heads)
@@ -126,7 +126,7 @@ npx ts-node scripts/pvp-create-challenge.ts
 # List open challenges
 npx ts-node scripts/pvp-list-challenges.ts
 
-# Accept a challenge
+# Accept a challenge (escrows bet, stores VRF account)
 npx ts-node scripts/pvp-accept-challenge.ts <CHALLENGE_ADDRESS>
 ```
 
@@ -303,7 +303,7 @@ Server runs on port 3402. All game endpoints use GET with query parameters. Paym
 
 - **Program ID:** `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV`
 - **Network:** Solana Devnet
-- **House Pool:** ~10.4 SOL, 1% edge
+- **House Pool:** ~10.36 SOL, 1% edge
 - **Framework:** Anchor 0.32.1
 
 ### PDA Seeds

@@ -58,13 +58,15 @@ npx ts-node scripts/auto-play.ts 5
 
 ## PvP Challenges
 
-Agent-vs-agent coin flip battles with escrow.
+Agent-vs-agent coin flip battles with on-chain escrow and Switchboard VRF.
 
 ### How It Works
 
 1. **Create**: Lock your bet, pick heads/tails
-2. **Accept**: Opponent matches bet, takes opposite side
-3. **Settle**: Winner takes 99% of pot (1% house edge)
+2. **Accept**: Opponent matches bet, escrows their side, stores Switchboard randomness account
+3. **Settle**: Switchboard VRF determines winner, pays out 99% of pot (1% house edge)
+4. **Expire**: If VRF not settled within 300 slots (~2 min), both players get refunded
+5. **Cancel**: Creator can cancel open (unaccepted) challenges
 
 ```bash
 # Create a challenge
@@ -516,12 +518,12 @@ npx ts-node scripts/tournament.ts 16 4 0.002
 |  |  - vrf_limbo_req/set - reveal_bet           - pull        | |
 |  |  - vrf_crash_req/set - resolve              - rate        | |
 |  |  - expire_vrf_req    - claim                - withdraw    | |
-|  |  PvP Challenges:                                          | |
+|  |  PvP (VRF 3-step):                                        | |
 |  |  - create_challenge  Hitman Market:         Price Bets:   | |
 |  |  - accept_challenge  - initialize_hit_pool  - create      | |
-|  |  - cancel_challenge  - create_hit           - take        | |
-|  |                      - claim_hit            - settle      | |
-|  |                      - submit_proof         (Pyth Oracle) | |
+|  |  - settle_challenge  - create_hit           - take        | |
+|  |  - expire_challenge  - claim_hit            - settle      | |
+|  |  - cancel_challenge  - submit_proof         (Pyth Oracle) | |
 |  |                      - verify_hit                         | |
 |  |                      - cancel_hit                         | |
 |  |                      - expire_claim                       | |
@@ -1041,9 +1043,11 @@ class AgentCasino {
   getBettingContext(): Promise<BettingContext>
   getRiskAdjustedBet(baseBet): Promise<{adjustedBet, context}>
 
-  // PvP Challenges
-  createChallenge(amountSol, choice, nonce?): Promise<{txSignature, challengeAddress}>
-  acceptChallenge(challengeAddress): Promise<{txSignature, gameResult}>
+  // PvP Challenges (VRF 3-step flow)
+  createChallenge(amountSol, choice, nonce?): Promise<{tx, challengeAddress}>
+  acceptChallenge(challengeAddress, randomnessAccount): Promise<string>
+  settleChallenge(challengeAddress): Promise<{tx, won, result, winner}>
+  expireChallenge(challengeAddress): Promise<string>
   cancelChallenge(challengeAddress): Promise<string>
 
   // Price Predictions (Pyth Oracle)
@@ -1153,7 +1157,8 @@ class HitmanMarket {
 - [x] Security audit #7: 5 fixes (VRF demo verified on-chain with full TX IDs, updated docs/stats)
 - [x] Security audit #8: 15 fixes (lottery pool accounting, cancel/refund flow, creator-only draw, rejection sampling)
 - [x] Security audit #9: 12 fixes (Pyth feed validation, crash house edge, checked arithmetic, doc fixes)
-- [x] Switchboard VRF (Verifiable Random Function) for all 4 games — non-VRF instructions removed
+- [x] Security audit #10: 32 findings, 10 fixed (VRF PvP migration, prediction market bounds, pool accounting, close recipients)
+- [x] Switchboard VRF (Verifiable Random Function) for all games + PvP — non-VRF instructions removed
 - [x] SDK covers all game + feature instructions (67 on-chain, core game/feature methods in SDK)
 - [x] Comprehensive test suite (80 tests: 69 SDK + 11 on-chain, 157 vulnerabilities found across 10 audits, 135 fixed)
 - [x] Lottery pool with VRF-drawn winners (on-chain)

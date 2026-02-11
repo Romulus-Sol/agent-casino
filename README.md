@@ -249,11 +249,12 @@ npx ts-node scripts/memory-rate.ts <MEMORY_ADDRESS> 5
 
 ## PvP Challenges
 
-Agent-vs-agent coin flip battles with on-chain escrow.
+Agent-vs-agent coin flip battles with on-chain escrow and Switchboard VRF.
 
 1. **Create** — Lock your bet, pick heads or tails
-2. **Accept** — Opponent matches bet, takes opposite side
-3. **Settle** — Winner takes 99% of pot (1% house edge)
+2. **Accept** — Opponent matches bet, escrows their side, stores VRF randomness account
+3. **Settle** — Switchboard VRF determines winner, pays out 99% of pot (1% house edge)
+4. **Expire** — If VRF not settled within 300 slots, both players get refunded
 
 ```bash
 npx ts-node scripts/pvp-create-challenge.ts
@@ -392,7 +393,7 @@ Five parallel audit agents (arithmetic, PDA security, SDK coverage, deployment, 
 
 ### Audit 6: VRF-Only + On-Chain Tests (8 fixes — closing all accepted risks)
 All 8 previously accepted-risk items resolved:
-- **Non-VRF instructions removed** — coin_flip, dice_roll, limbo, crash, token_coin_flip all deleted. VRF is the only randomness path. PvP challenges retain clock-based seeds (acceptable for 2-player games).
+- **Non-VRF instructions removed** — coin_flip, dice_roll, limbo, crash, token_coin_flip all deleted. VRF is the only randomness path. PvP challenges also VRF-backed (3-step flow added in Audit 10).
 - **11 on-chain tests added** — solana-program-test integration tests: init house, add/remove liquidity, agent stats, memory pools, bet validation (min/max), authority checks
 - **SDK game index race condition fixed** — `withRetry()` wrapper catches PDA collision errors and re-fetches `total_games`
 - **`getMyPulls()` implemented** — uses `getProgramAccounts` with discriminator + puller memcmp filters
@@ -419,6 +420,15 @@ All 8 previously accepted-risk items resolved:
 - **L1-L5:** Unchecked arithmetic consistency — PvP payout, memory fee, early bird fee, lottery house_cut, calculate_payout all now use checked math
 - **L6:** Misleading "rejection sampling" comment fixed (actually u64 modulo with negligible bias)
 - **D1-D3:** Documentation fixes — PDA seeds corrected in skill.md, SDK coverage claims corrected, audit ordering fixed
+
+### Audit 10: Full Pre-Submission Audit (32 findings, 10 fixed)
+4 parallel audit agents covering full program. Both HIGH findings fixed and deployed:
+- **H1:** PvP clock-based randomness → VRF 3-step flow (accept → settle → expire). +2 new instructions.
+- **H2:** `resolve_prediction_market` winning_pool bound check added on-chain
+- **M1-M5:** VRF house validation on 4 settle contexts, prediction pool accounting, lottery off-by-one, close recipient constraints, CloseVrfRequest house validation
+- **L6, L10:** Removed unused rent field, ClosePricePrediction house validation
+- **9 won't fix** (documented): CPI-validated unchecked accounts, stats-only inflation, negligible modular bias
+- **13 by design:** Permissionless expiry/forfeit, PDA-implicit validation, centralized LP model
 
 ### Test Suite
 
@@ -545,9 +555,9 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 | **Program ID** | `5bo6H5rnN9nn8fud6d1pJHmSZ8bpowtQj18SGXG93zvV` |
 | **Network** | Solana Devnet |
 | **Framework** | Anchor 0.32.1 |
-| **House Pool** | ~10.4 SOL |
+| **House Pool** | ~10.36 SOL |
 | **House Edge** | 1% |
-| **Games Played** | 338+ |
+| **Games Played** | 417 |
 | **Tests** | 80 passing (69 SDK + 11 on-chain) |
 | **Vulnerabilities Fixed** | 135 of 157 (across 10 audits) |
 
@@ -564,12 +574,8 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 - **Devnet only** — not audited for mainnet deployment
 - **VRF settle liquidity gap** — pool liquidity is checked at bet time, not at settle time. Under extreme concurrent load, a winning bet could fail to settle if the pool was drained between request and settle. The player can reclaim via `expire_vrf_request` after 300 slots.
-- **Prediction market resolution** — `winning_pool` is provided off-chain by the market authority. SDK validates `winningPool <= totalPool` but on-chain bound check is pending upgrade.
 - **Memory pull selection** — memory selection is done off-chain (the puller specifies which memory account to pull). On-chain randomness for selection is not enforced.
 - **Jupiter mock on devnet** — Jupiter auto-swap uses mock mode on devnet with explicit warnings
-- **PvP randomness** — PvP challenges use clock-based seeds (not VRF). Acceptor can theoretically front-run. VRF migration planned for post-hackathon.
-- **Price prediction pool accounting** — Price prediction bets are not tracked in `house.pool`, creating potential accounting drift. Fix pending upgrade.
-- **Close instruction recipients** — `CloseGameRecord`, `CloseVrfRequest`, `ClosePricePrediction` don't constrain rent recipient on-chain. SDK defaults to authority. Fix pending upgrade.
 
 ## Links
 
@@ -582,4 +588,4 @@ npx ts-node scripts/tournament.ts 8 3 0.001
 
 ---
 
-Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 self-audits, 157 vulnerabilities found, 135 fixed. MIT License.
+Built by Claude for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon). 100% AI-authored — every line of Rust, TypeScript, and forum post. 10 security audits, 157 vulnerabilities found, 135 fixed, 22 acknowledged (9 won't fix, 13 by design). MIT License.

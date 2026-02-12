@@ -212,7 +212,7 @@ generate_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product.
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building primitive for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The games demonstrate the trust layer; the verification infrastructure is the product.
 
 HACKATHON STATUS (from heartbeat API — these are live, authoritative numbers):
 - Day $HACKATHON_DAY of the hackathon
@@ -225,9 +225,9 @@ HACKATHON STATUS (from heartbeat API — these are live, authoritative numbers):
 $([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE — $ANNOUNCEMENT_MSG\")
 
 WHAT AGENT CASINO IS (use ONLY these facts — do NOT invent, extrapolate, or rephrase into different stats):
-- Trust primitive: games are the simplest way for agents to build verifiable trust (small bet, instant outcome, on-chain proof)
+- A trust-building primitive for AI agents. Games are the simplest proof that two agents can interact fairly — small stakes, instant settlement, VRF-verifiable outcomes.
+- The verification layer is the product: on-chain attestations, VRF proofs, execution traces. Games are just the demo.
 - 4 provably fair games: coin flip, dice roll, limbo, crash (all VRF-only via Switchboard)
-- Every game generates a verifiable on-chain attestation — any agent can verify nobody cheated
 - PvP challenges, memory slots marketplace, hitman bounty market, lottery pools
 - x402 HTTP API (live at http://157.245.11.79:3402), Jupiter auto-swap, SPL token vaults, LP system
 - 12 security audits (NOT '12 integrations' or '12 partnerships' — audits only), 175 findings, 151 fixed, 11 won't fix, 13 by design
@@ -268,6 +268,13 @@ NO EMPTY PROMISES (CRITICAL):
 - It's OK to say 'our SDK already supports X if you want to try it' — because that's pointing to something that EXISTS.
 - Be real. Be helpful. Don't hype. If you catch yourself writing enthusiasm about something we COULD do, delete it.
 
+NO FEATURE STRETCHING (CRITICAL):
+- We are a trust-building primitive demonstrated through games. Describe our project that way — NOT as 'a casino'.
+- withExecutionTrace() hashes pre-game decisions (bet amount, choice, client seed). Do NOT say it hashes 'pre-trade decisions', 'position sizes', or 'stop losses'.
+- formatAttestation() and verifyAttestationHash() verify VRF game outcomes. They demonstrate trust verification — but do NOT claim they are general-purpose agent accountability or flight recording tools.
+- Our Hitman Market is a simple bounty escrow. Do NOT describe it as a swarm coordination layer or task dependency system.
+- If their project solves a problem in a different domain, say 'interesting approach' — do NOT force-fit our features into their domain.
+
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary, no markdown formatting, no bullet points about what you did. Just the reply exactly as it should be posted.
 
 REPLY RULES:
@@ -275,7 +282,7 @@ REPLY RULES:
 - Be friendly, genuine, substantive — no empty praise or hollow enthusiasm
 - 2-5 sentences max. Conversational, not formal
 - If they asked a question, answer it specifically
-- If relevant, briefly mention Agent Casino but don't be pushy
+- If relevant, briefly mention Agent Casino as a trust primitive — not as 'a casino'. Don't be pushy.
 - If they mention integration or collaboration: share what we already have (SDK, repo, PDAs) but do NOT promise to build anything new. Say 'the SDK is open source if you want to try it' not 'let's build this together!'
 - When mentioning game counts or stats, ONLY use the live on-chain numbers above. Never hardcode or guess.
 - INVITE THEM TO TRY IT: When relevant, invite agents to actually use our product. Examples: 'Check out our agent guide at http://157.245.11.79:3402/#guide — you can play a coin flip in 3 lines of code' or 'Fetch our skill.md at http://157.245.11.79:3402/skill.md to see how to integrate' or 'You can see live stats at http://157.245.11.79:3402'. Pick ONE link that's most relevant. Don't spam all of them.
@@ -294,7 +301,7 @@ generate_integration_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. (VRF-only randomness, 12 security audits, 175 findings, 151 fixed, 68 SDK tests).
+        --system-prompt "You write forum replies for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building primitive for AI agents on Solana. Games are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The games demonstrate the trust layer; the verification infrastructure is the product. (VRF-only randomness, 12 security audits, 175 findings, 151 fixed, 68 SDK tests).
 
 HACKATHON STATUS (from heartbeat API):
 - Day $HACKATHON_DAY, $HACKATHON_TIME_REMAINING, deadline Feb 13 noon EST
@@ -302,7 +309,7 @@ HACKATHON STATUS (from heartbeat API):
 - Project status: $PROJECT_STATUS
 $([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE\")
 
-Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The deadline is $HACKATHON_TIME_REMAINING away. We cannot commit to new integrations.
+Someone mentioned integration or collaboration. Share what we ALREADY HAVE — but do NOT promise to build anything new. The deadline is $HACKATHON_TIME_REMAINING away. We cannot commit to new integrations. Describe our project as a trust-building primitive, NOT as 'a casino'.
 
 OUTPUT FORMAT: Output ONLY the reply text. Nothing else. No explanations, no commentary. Just the reply exactly as it should be posted.
 
@@ -336,6 +343,13 @@ NO EMPTY PROMISES (CRITICAL):
 - It's fine to say 'our SDK already supports X' or 'the repo is open source if you want to build on it'
 - Be helpful and honest, not hypey. If you catch yourself writing enthusiasm about something we COULD do, delete it.
 
+NO FEATURE STRETCHING (CRITICAL):
+- We are a trust-building primitive demonstrated through games. Always describe us that way — NOT as 'a casino'.
+- withExecutionTrace() hashes pre-game decisions. Do NOT say it hashes trading decisions or position sizes.
+- formatAttestation()/verifyAttestationHash() verify VRF game outcomes. They demonstrate trust verification, but are NOT general-purpose agent accountability tools.
+- Hitman Market is simple bounty escrow. Not a swarm coordinator or task dependency system.
+- If their use case is outside gaming, describe our features honestly as trust verification primitives demonstrated through games. Don't stretch them to fit other domains.
+
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt (no fake integration counts, partnership numbers, user counts, etc.)
 - '12 security audits' means audit rounds we ran on our own code — NOT integrations, NOT partnerships, NOT collaborations
@@ -364,7 +378,7 @@ generate_outreach_reply() {
     local context="$1"
     local reply
     reply=$(claude -p --model sonnet --no-session-persistence --tools "" \
-        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building protocol for AI agents on Solana. Games (coin flip, dice, limbo, crash) are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The casino is the demo; the verification layer is the product. 12 security audits run on our own code, 175 findings, 151 fixed, 11 won't fix, 13 by design. 100% AI-built.
+        --system-prompt "You write forum comments for Claude-the-Romulan, an AI agent in the Colosseum Agent Hackathon. Your project is Agent Casino — a trust-building primitive for AI agents on Solana. Games (coin flip, dice, limbo, crash) are the simplest proof that two agents can interact fairly: small stakes, instant settlement, VRF-verifiable outcomes. The games demonstrate the trust layer; the verification infrastructure is the product. 12 security audits run on our own code, 175 findings, 151 fixed, 11 won't fix, 13 by design. 100% AI-built.
 
 HACKATHON STATUS (from heartbeat API):
 - Day $HACKATHON_DAY, $HACKATHON_TIME_REMAINING, deadline Feb 13 noon EST
@@ -372,7 +386,7 @@ HACKATHON STATUS (from heartbeat API):
 - Project status: $PROJECT_STATUS
 $([ -n \"$ANNOUNCEMENT_TITLE\" ] && echo \"- ORGANIZER ANNOUNCEMENT: $ANNOUNCEMENT_TITLE\")
 
-YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it.
+YOUR GOAL: Genuine engagement. Lead with VALUE for them — a technical insight, a real question, or something helpful. Then naturally bridge to how one of our features connects to what they're building. Never force it. Always describe our project as a trust-building primitive — NOT as 'a casino'.
 
 LIVE ON-CHAIN STATS (just fetched from devnet):
 - Total games played: $ONCHAIN_TOTAL_GAMES
@@ -412,6 +426,14 @@ NO EMPTY PROMISES (CRITICAL):
 - Only mention features that ALREADY EXIST and WORK. Point them to the SDK/repo if they want to build on it themselves.
 - Do NOT describe hypothetical integrations ('X could use Y instead of Z'). Only describe what works today.
 - Be honest and grounded. Hollow enthusiasm makes us look like we don't follow through.
+
+NO FEATURE STRETCHING (CRITICAL):
+- We are a trust-building primitive for AI agents. Games demonstrate the trust layer. Always describe us that way — NOT as 'a casino'.
+- Do NOT re-describe our features as solving problems in trading, identity verification, swarm coordination, fleet management, or other domains.
+- withExecutionTrace() hashes pre-game decisions (bet amount, choice, client seed). It does NOT hash trading decisions or position sizes.
+- formatAttestation()/verifyAttestationHash() verify VRF game outcomes. They demonstrate trust verification, but are NOT general-purpose agent flight recorders.
+- Hitman Market is simple bounty escrow. It is NOT a swarm coordination layer.
+- If their post is about a domain we don't operate in, engage with their topic genuinely but do NOT claim our features solve their problem.
 
 ANTI-HALLUCINATION RULES (CRITICAL):
 - NEVER invent statistics not listed in this prompt
@@ -460,6 +482,10 @@ is_bad_reply() {
 
 # Track agents we've replied to per post THIS RUN (prevents triple-reply to same agent)
 declare -A REPLIED_THIS_RUN  # key: "postId:agentNameLower" → 1
+
+# Track per-agent outreach count THIS RUN (prevents spamming the same prolific poster)
+declare -A AGENT_OUTREACH_COUNT  # key: agentNameLower → count
+MAX_OUTREACH_PER_AGENT=2  # Max replies to any single agent per run across Phase 2+3
 
 # ── Main Logic ────────────────────────────────────────────────────
 log "═══ FORUM REPLY AGENT START ═══"
@@ -560,7 +586,7 @@ IMPORTANT: This agent mentioned voting. Our project currently has $PROJECT_HUMAN
 Agent name: $AGENT_NAME
 Their comment: $COMMENT_BODY
 
-Our post is about Agent Casino. Generate a friendly, substantive reply. Start with @$AGENT_NAME$VOTE_CONTEXT"
+Our post is about Agent Casino — a trust-building primitive for AI agents. Generate a friendly, substantive reply. Start with @$AGENT_NAME$VOTE_CONTEXT"
 
         if [ "$IS_INTEGRATION" = true ]; then
             REPLY=$(generate_integration_reply "$CONTEXT")
@@ -642,6 +668,13 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
         # Skip if already engaged
         already_engaged "$POST_ID" && continue
 
+        # Per-agent rate limit: don't spam prolific posters (e.g. zolty, SlotScribe)
+        AGENT_KEY_LOWER=$(echo "$POST_AGENT_NAME" | tr '[:upper:]' '[:lower:]')
+        CURRENT_AGENT_COUNT=${AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]:-0}
+        if [ "$CURRENT_AGENT_COUNT" -ge "$MAX_OUTREACH_PER_AGENT" ]; then
+            continue
+        fi
+
         # Check if post mentions us directly (highest priority)
         MENTIONS_US=false
         if echo "$POST_BODY $POST_TITLE" | grep -qiE "Agent.Casino|Romulus.Sol|Claude.the.Romulan"; then
@@ -673,13 +706,13 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
 
         if [ "$IS_INTEGRATION" = true ]; then
             log "*** Phase 2 INTEGRATION HIT: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE ***"
-            CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could integrate with Agent Casino.
+            CONTEXT="Write a comment on this hackathon forum post by another agent. They are working on something that could connect with Agent Casino's trust verification layer.
 
 Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 800 chars): ${POST_BODY:0:800}
 
-This agent is building something relevant to us. Write a compelling comment that shows how Agent Casino could integrate with or complement their project. Be specific about which of our features are relevant. Invite them to use our SDK and code. Start with @$POST_AGENT_NAME."
+This agent is building something relevant to us. Write a compelling comment that shows how our trust-building primitive (demonstrated through verifiable games) connects to what they're building. Be specific about which features are relevant. Invite them to try our SDK. Start with @$POST_AGENT_NAME."
             REPLY=$(generate_integration_reply "$CONTEXT")
         else
             log "Phase 2 OUTREACH: post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
@@ -689,7 +722,7 @@ Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 800 chars): ${POST_BODY:0:800}
 
-Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight from your experience building Agent Casino. Then naturally mention whichever ONE feature of ours connects to what they're doing. Start with @$POST_AGENT_NAME."
+Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight. Then naturally mention how our trust-building primitive connects to what they're doing — if it does. If there's no genuine connection, just engage with their topic. Start with @$POST_AGENT_NAME."
             REPLY=$(generate_outreach_reply "$CONTEXT")
         fi
 
@@ -725,6 +758,7 @@ Lead with genuine interest in THEIR project. Ask a real question or share a rele
             mark_engaged "$POST_ID"
             REPLY_COUNT=$((REPLY_COUNT + 1))
             INTEGRATION_REPLIES=$((INTEGRATION_REPLIES + 1))
+            AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]=$(( ${AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]:-0} + 1 ))
             sleep 3
         fi
     done
@@ -764,6 +798,13 @@ if [ "$REPLY_COUNT" -lt "$MAX_REPLIES_PER_RUN" ]; then
         # Skip if already engaged
         already_engaged "$POST_ID" && continue
 
+        # Per-agent rate limit (shared with Phase 2)
+        AGENT_KEY_LOWER=$(echo "$POST_AGENT_NAME" | tr '[:upper:]' '[:lower:]')
+        CURRENT_AGENT_COUNT=${AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]:-0}
+        if [ "$CURRENT_AGENT_COUNT" -ge "$MAX_OUTREACH_PER_AGENT" ]; then
+            continue
+        fi
+
         # Check if we already have a comment on this post
         POST_COMMENTS=$(api_get "/forum/posts/$POST_ID/comments")
         OUR_EXISTING=$(echo "$POST_COMMENTS" | jq "[.comments[]? | select(.agentId == $OUR_AGENT_ID)] | length")
@@ -793,7 +834,7 @@ Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 800 chars): ${POST_BODY:0:800}
 
-This agent is building something relevant to us. Write a compelling comment showing how Agent Casino could integrate with their project. Start with @$POST_AGENT_NAME."
+This agent is building something relevant to us. Write a compelling comment showing how our trust verification layer connects to their project. Start with @$POST_AGENT_NAME."
             REPLY=$(generate_integration_reply "$CONTEXT")
         else
             log "Phase 3 OUTREACH: hot post #$POST_ID by $POST_AGENT_NAME: $POST_TITLE"
@@ -803,7 +844,7 @@ Post author: $POST_AGENT_NAME
 Post title: $POST_TITLE
 Post body (first 800 chars): ${POST_BODY:0:800}
 
-Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight from your experience building Agent Casino. Then naturally mention whichever ONE feature of ours connects to what they're doing. Start with @$POST_AGENT_NAME."
+Lead with genuine interest in THEIR project. Ask a real question or share a relevant insight. Then naturally mention how our trust-building primitive connects to what they're doing — if it does. If there's no genuine connection, just engage with their topic. Start with @$POST_AGENT_NAME."
             REPLY=$(generate_outreach_reply "$CONTEXT")
         fi
 
@@ -839,6 +880,7 @@ Lead with genuine interest in THEIR project. Ask a real question or share a rele
             log "  SUCCESS: Phase 3 outreach (ID: $COMMENT_ID) [$([ "$IS_INTEGRATION" = true ] && echo 'integration' || echo 'outreach')]"
             mark_engaged "$POST_ID"
             REPLY_COUNT=$((REPLY_COUNT + 1))
+            AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]=$(( ${AGENT_OUTREACH_COUNT[$AGENT_KEY_LOWER]:-0} + 1 ))
             sleep 3
         fi
     done
